@@ -54,9 +54,6 @@ var (
 	barHi  = lipgloss.NewStyle().Foreground(lipgloss.Color("#ef4444"))
 	barBg  = lipgloss.NewStyle().Foreground(lipgloss.Color("#1e293b"))
 
-	// Separator line
-	sepStyle = lipgloss.NewStyle().Foreground(lipgloss.Color("#334155"))
-
 	// Help line
 	helpStyle = lipgloss.NewStyle().
 			Foreground(lipgloss.Color("#64748b")).
@@ -68,21 +65,21 @@ var (
 type tickMsg time.Time
 
 type Model struct {
-	collector  *collector.Collector
-	sample     *collector.Sample
-	width      int
-	height     int
-	interval   time.Duration
-	showCores  bool // toggle per-core CPU with 'a'
+	collector *collector.Collector
+	sample    *collector.Sample
+	width     int
+	height    int
+	interval  time.Duration
+	showCores bool // toggle per-core CPU with 'a'
 }
 
 func NewModel(c *collector.Collector, interval time.Duration) Model {
 	return Model{
-		collector:  c,
-		interval:   interval,
-		width:      120,
-		height:     40,
-		showCores:  false,
+		collector: c,
+		interval:  interval,
+		width:     120,
+		height:    40,
+		showCores: false,
 	}
 }
 

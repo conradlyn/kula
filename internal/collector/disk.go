@@ -22,7 +22,7 @@ func parseDiskStats() map[string]diskRaw {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	result := make(map[string]diskRaw)
 	scanner := bufio.NewScanner(f)
@@ -130,7 +130,7 @@ func collectFileSystems() []FileSystemInfo {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var result []FileSystemInfo
 	seen := make(map[string]bool)

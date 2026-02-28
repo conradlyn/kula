@@ -97,7 +97,7 @@ func runServe(cfg *config.Config) {
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	server := web.NewServer(cfg.Web, coll, store)
 
@@ -112,7 +112,9 @@ func runServe(cfg *config.Config) {
 
 		// Initial collection
 		sample := coll.Collect()
-		store.WriteSample(sample)
+		if err := store.WriteSample(sample); err != nil {
+			log.Printf("Storage write error: %v", err)
+		}
 		server.BroadcastSample(sample)
 
 		for range ticker.C {

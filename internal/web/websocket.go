@@ -27,14 +27,14 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		s.hub.regCh <- client
 		defer func() {
 			s.hub.unregCh <- client
-			conn.Close()
+			_ = conn.Close()
 		}()
 
 		// Send initial current data
 		if sample := s.collector.Latest(); sample != nil {
 			data, err := json.Marshal(sample)
 			if err == nil {
-				websocket.Message.Send(conn, string(data))
+				_ = websocket.Message.Send(conn, string(data))
 			}
 		}
 
@@ -67,7 +67,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 
 		// Write pump
 		for data := range client.sendCh {
-			conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
+			_ = conn.SetWriteDeadline(time.Now().Add(10 * time.Second))
 			if err := websocket.Message.Send(conn, string(data)); err != nil {
 				log.Printf("WebSocket write error: %v", err)
 				return

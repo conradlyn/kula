@@ -19,7 +19,7 @@ func parseNetDev() map[string]netRaw {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	result := make(map[string]netRaw)
 	scanner := bufio.NewScanner(f)
@@ -110,7 +110,7 @@ func parseSockstatFile(path string, ss *SocketStats) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -169,7 +169,7 @@ func parseSockstatFile6(path string, ss *SocketStats) {
 	if err != nil {
 		return
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -216,7 +216,7 @@ func parseSNMP(proto string) NetProtoStats {
 	if err != nil {
 		return NetProtoStats{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	ns := NetProtoStats{}
 	scanner := bufio.NewScanner(f)
@@ -276,7 +276,7 @@ func parseSNMP6(proto string) NetProtoStats {
 	if err != nil {
 		return NetProtoStats{}
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	ns := NetProtoStats{}
 	scanner := bufio.NewScanner(f)

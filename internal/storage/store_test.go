@@ -37,7 +37,7 @@ func makeSample(ts time.Time) *collector.Sample {
 
 func TestNewStore(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	if len(store.tiers) != 1 {
 		t.Errorf("Tier count = %d, want 1", len(store.tiers))
@@ -46,7 +46,7 @@ func TestNewStore(t *testing.T) {
 
 func TestWriteAndQuerySample(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	now := time.Now()
 	sample := makeSample(now)
@@ -71,7 +71,7 @@ func TestWriteAndQuerySample(t *testing.T) {
 
 func TestWriteMultipleSamples(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	base := time.Now()
 	for i := 0; i < 10; i++ {
@@ -92,11 +92,15 @@ func TestWriteMultipleSamples(t *testing.T) {
 
 func TestQueryLatest(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	now := time.Now()
-	store.WriteSample(makeSample(now))
-	store.WriteSample(makeSample(now.Add(time.Second)))
+	if err := store.WriteSample(makeSample(now)); err != nil {
+		t.Fatalf("WriteSample() error: %v", err)
+	}
+	if err := store.WriteSample(makeSample(now.Add(time.Second))); err != nil {
+		t.Fatalf("WriteSample() error: %v", err)
+	}
 
 	latest, err := store.QueryLatest()
 	if err != nil {
@@ -120,7 +124,7 @@ func TestRingBufferWrapRead(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewStore() error: %v", err)
 	}
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
 	totalSamples := 500 // enough to wrap multiple times in 128KB
@@ -157,7 +161,7 @@ func TestRingBufferWrapRead(t *testing.T) {
 
 func TestQueryRangeEmpty(t *testing.T) {
 	store := newTestStore(t)
-	defer store.Close()
+	defer func() { _ = store.Close() }()
 
 	results, err := store.QueryRange(time.Now(), time.Now().Add(time.Minute))
 	if err != nil {

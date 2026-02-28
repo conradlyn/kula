@@ -70,7 +70,7 @@ func parseUtmp() []User {
 		// Fallback: read from 'who' style info in /proc
 		return parseUsersFromProc()
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var users []User
 	// utmp record size on x86_64 Linux is 384 bytes
@@ -144,7 +144,7 @@ func parseUsersFromProc() []User {
 				}
 			}
 		}
-		f.Close()
+		_ = f.Close()
 	}
 
 	// This fallback doesn't give us usernames without cgo, just return count

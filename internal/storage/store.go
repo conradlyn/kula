@@ -40,7 +40,7 @@ func NewStore(cfg config.StorageConfig) (*Store, error) {
 		if err != nil {
 			// Close already opened tiers
 			for _, t := range s.tiers {
-				t.Close()
+				_ = t.Close()
 			}
 			return nil, fmt.Errorf("opening tier %d: %w", i, err)
 		}

@@ -61,7 +61,7 @@ func OpenTier(path string, maxSize int64) (*Tier, error) {
 
 	info, err := f.Stat()
 	if err != nil {
-		f.Close()
+		_ = f.Close()
 		return nil, err
 	}
 
@@ -71,7 +71,7 @@ func OpenTier(path string, maxSize int64) (*Tier, error) {
 			t.writeOff = 0
 			t.count = 0
 			if err := t.writeHeader(); err != nil {
-				f.Close()
+				_ = f.Close()
 				return nil, err
 			}
 		}
@@ -79,7 +79,7 @@ func OpenTier(path string, maxSize int64) (*Tier, error) {
 		t.writeOff = 0
 		t.count = 0
 		if err := t.writeHeader(); err != nil {
-			f.Close()
+			_ = f.Close()
 			return nil, err
 		}
 	}
@@ -163,7 +163,7 @@ func (t *Tier) Write(s *AggregatedSample) error {
 		if t.writeOff+4 <= t.maxData {
 			sentinel := make([]byte, 4)
 			// sentinel is already all zeros (dataLen == 0)
-			t.file.WriteAt(sentinel, headerSize+t.writeOff)
+			_, _ = t.file.WriteAt(sentinel, headerSize+t.writeOff)
 		}
 		t.writeOff = 0
 		t.wrapped = true

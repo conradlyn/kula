@@ -1,0 +1,7 @@
+Running golangci-lint...
+(...)
+19 issues:
+* errcheck: 18
+* unused: 1
+
+How about these issues?

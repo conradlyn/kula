@@ -2,20 +2,24 @@
 
 set -e
 
+GREEN="\033[0;32m"
+CYAN="\033[0;36m"
+RESET="\033[0m"
+
 cd "$(dirname "$0")/.."
 
-echo "Running go vet..."
+echo -e "${CYAN}Running go vet...${RESET}"
 go vet ./...
 
-echo -e "\nRunning go test..."
+echo -e "${CYAN}Running go test...${RESET}"
 go test -v -race ./...
 
 if command -v golangci-lint &>/dev/null; then
-    echo -e "\nRunning golangci-lint..."
+    echo -e "${CYAN}Running golangci-lint...${RESET}"
     golangci-lint run ./...
 else
-    echo -e "\nSkipping golangci-lint (not installed)"
+    echo -e "${CYAN}Skipping golangci-lint (not installed)${RESET}"
     echo "  Install: https://golangci-lint.run/welcome/install/"
 fi
 
-echo -e "\nAll checks passed!"
+echo -e "\n🎉 All checks ${GREEN}passed!${RESET}"

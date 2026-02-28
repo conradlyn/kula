@@ -9,9 +9,9 @@ import (
 )
 
 type cpuRaw struct {
-	id                                                     string
+	id                                                    string
 	user, nice, system, idle, iowait, irq, softirq, steal uint64
-	guest, guestNice                                       uint64
+	guest, guestNice                                      uint64
 }
 
 func parseProcStat() []cpuRaw {
@@ -19,7 +19,7 @@ func parseProcStat() []cpuRaw {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	var result []cpuRaw
 	scanner := bufio.NewScanner(f)
@@ -190,7 +190,7 @@ func parseMemInfo() map[string]uint64 {
 	if err != nil {
 		return nil
 	}
-	defer f.Close()
+	defer func() { _ = f.Close() }()
 
 	result := make(map[string]uint64)
 	scanner := bufio.NewScanner(f)
