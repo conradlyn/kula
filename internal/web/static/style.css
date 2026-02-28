@@ -436,10 +436,8 @@ body {
     box-shadow: var(--shadow-glow);
 }
 
-.gauge-card canvas {
-    display: block;
-    margin: 0 auto;
-}
+
+
 
 .gauge-label {
     font-size: 0.75rem;

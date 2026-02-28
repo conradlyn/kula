@@ -68,59 +68,7 @@
     Chart.defaults.plugins.legend.labels.pointStyleWidth = 8;
     Chart.defaults.plugins.legend.labels.boxHeight = 6;
 
-    // ---- Gauge Drawing ----
-    function drawGauge(canvasId, value, max, color) {
-        const canvas = document.getElementById(canvasId);
-        if (!canvas) return;
-        const ctx = canvas.getContext('2d');
-        const w = canvas.width;
-        const h = canvas.height;
-        const cx = w / 2;
-        const cy = h - 5;
-        const radius = Math.min(cx - 10, cy - 10);
 
-        ctx.clearRect(0, 0, w, h);
-
-        // Background arc
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, Math.PI, 2 * Math.PI);
-        ctx.strokeStyle = 'rgba(30, 41, 59, 0.8)';
-        ctx.lineWidth = 12;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-
-        // Value arc
-        const pct = Math.min(value / max, 1);
-        const endAngle = Math.PI + pct * Math.PI;
-
-        // Gradient
-        const grad = ctx.createLinearGradient(cx - radius, cy, cx + radius, cy);
-        if (typeof color === 'string') {
-            grad.addColorStop(0, color);
-            grad.addColorStop(1, color);
-        } else {
-            color.forEach((c, i) => grad.addColorStop(i / (color.length - 1), c));
-        }
-
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, Math.PI, endAngle);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 12;
-        ctx.lineCap = 'round';
-        ctx.stroke();
-
-        // Glow effect
-        ctx.beginPath();
-        ctx.arc(cx, cy, radius, Math.PI, endAngle);
-        ctx.strokeStyle = grad;
-        ctx.lineWidth = 12;
-        ctx.lineCap = 'round';
-        ctx.filter = 'blur(6px)';
-        ctx.globalAlpha = 0.3;
-        ctx.stroke();
-        ctx.filter = 'none';
-        ctx.globalAlpha = 1;
-    }
 
     // ---- Bar Gauge Drawing (alternative layout) ----
     function drawBarGauge(containerId, value, max, color) {
@@ -156,46 +104,24 @@
             });
         }
 
-        if (state.layoutMode === 'list') {
-            // Bar gauges for CPU and Network in list mode
-            drawBarGauge('gauge-cpu-canvas', cpuPct, 100, [colors.green, colors.yellow, colors.red]);
-            document.getElementById('gauge-cpu-value').textContent = cpuPct.toFixed(1) + '%';
+        drawBarGauge('gauge-cpu-canvas', cpuPct, 100, [colors.green, colors.yellow, colors.red]);
+        document.getElementById('gauge-cpu-value').textContent = cpuPct.toFixed(1) + '%';
 
-            drawBarGauge('gauge-ram-canvas', ramPct, 100, [colors.cyan, colors.blue, colors.purple]);
-            document.getElementById('gauge-ram-value').textContent = ramPct.toFixed(1) + '%';
+        drawBarGauge('gauge-ram-canvas', ramPct, 100, [colors.cyan, colors.blue, colors.purple]);
+        document.getElementById('gauge-ram-value').textContent = ramPct.toFixed(1) + '%';
 
-            drawBarGauge('gauge-swap-canvas', swapPct, 100, [colors.teal, colors.orange, colors.red]);
-            document.getElementById('gauge-swap-value').textContent = swapPct.toFixed(1) + '%';
+        drawBarGauge('gauge-swap-canvas', swapPct, 100, [colors.teal, colors.orange, colors.red]);
+        document.getElementById('gauge-swap-value').textContent = swapPct.toFixed(1) + '%';
 
-            drawBarGauge('gauge-lavg-canvas', lavg, numCores * 2, [colors.green, colors.yellow, colors.red]);
-            document.getElementById('gauge-lavg-value').textContent = lavg.toFixed(2);
+        drawBarGauge('gauge-lavg-canvas', lavg, numCores * 2, [colors.green, colors.yellow, colors.red]);
+        document.getElementById('gauge-lavg-value').textContent = lavg.toFixed(2);
 
-            const maxNet = Math.max(dlMbps, ulMbps, 1);
-            drawBarGauge('gauge-dl-canvas', dlMbps, Math.max(maxNet * 1.5, 10), [colors.cyan, colors.blue]);
-            document.getElementById('gauge-dl-value').textContent = formatMbps(dlMbps);
+        const maxNet = Math.max(dlMbps, ulMbps, 1);
+        drawBarGauge('gauge-dl-canvas', dlMbps, Math.max(maxNet * 1.5, 10), [colors.cyan, colors.blue]);
+        document.getElementById('gauge-dl-value').textContent = formatMbps(dlMbps);
 
-            drawBarGauge('gauge-ul-canvas', ulMbps, Math.max(maxNet * 1.5, 10), [colors.pink, colors.purple]);
-            document.getElementById('gauge-ul-value').textContent = formatMbps(ulMbps);
-        } else {
-            drawGauge('gauge-cpu-canvas', cpuPct, 100, [colors.green, colors.yellow, colors.red]);
-            document.getElementById('gauge-cpu-value').textContent = cpuPct.toFixed(1) + '%';
-
-            drawGauge('gauge-ram-canvas', ramPct, 100, [colors.cyan, colors.blue, colors.purple]);
-            document.getElementById('gauge-ram-value').textContent = ramPct.toFixed(1) + '%';
-
-            drawGauge('gauge-swap-canvas', swapPct, 100, [colors.teal, colors.orange, colors.red]);
-            document.getElementById('gauge-swap-value').textContent = swapPct.toFixed(1) + '%';
-
-            drawGauge('gauge-lavg-canvas', lavg, numCores * 2, [colors.green, colors.yellow, colors.red]);
-            document.getElementById('gauge-lavg-value').textContent = lavg.toFixed(2);
-
-            const maxNet = Math.max(dlMbps, ulMbps, 1);
-            drawGauge('gauge-dl-canvas', dlMbps, Math.max(maxNet * 1.5, 10), [colors.cyan, colors.blue]);
-            document.getElementById('gauge-dl-value').textContent = formatMbps(dlMbps);
-
-            drawGauge('gauge-ul-canvas', ulMbps, Math.max(maxNet * 1.5, 10), [colors.pink, colors.purple]);
-            document.getElementById('gauge-ul-value').textContent = formatMbps(ulMbps);
-        }
+        drawBarGauge('gauge-ul-canvas', ulMbps, Math.max(maxNet * 1.5, 10), [colors.pink, colors.purple]);
+        document.getElementById('gauge-ul-value').textContent = formatMbps(ulMbps);
     }
 
     // ---- Chart Initialization ----
@@ -857,15 +783,11 @@
             btn.classList.add('layout-active');
             btn.textContent = '⊟';
             btn.title = 'Switch to grid layout';
-            // Replace gauge canvases with divs for bar gauges
-            replaceGaugesForBarMode();
         } else {
             dashboard.classList.remove('layout-list');
             btn.classList.remove('layout-active');
             btn.textContent = '⊞';
             btn.title = 'Switch to list layout';
-            // Restore gauge canvases
-            restoreGaugesForArcMode();
         }
 
         // Re-init charts for new layout
@@ -881,31 +803,7 @@
         }
     }
 
-    function replaceGaugesForBarMode() {
-        const gaugeCanvasIds = ['gauge-cpu-canvas', 'gauge-ram-canvas', 'gauge-swap-canvas', 'gauge-lavg-canvas', 'gauge-dl-canvas', 'gauge-ul-canvas'];
-        gaugeCanvasIds.forEach(id => {
-            const el = document.getElementById(id);
-            if (el && el.tagName === 'CANVAS') {
-                const div = document.createElement('div');
-                div.id = id;
-                el.replaceWith(div);
-            }
-        });
-    }
 
-    function restoreGaugesForArcMode() {
-        const gaugeCanvasIds = ['gauge-cpu-canvas', 'gauge-ram-canvas', 'gauge-swap-canvas', 'gauge-lavg-canvas', 'gauge-dl-canvas', 'gauge-ul-canvas'];
-        gaugeCanvasIds.forEach(id => {
-            const el = document.getElementById(id);
-            if (el && el.tagName !== 'CANVAS') {
-                const canvas = document.createElement('canvas');
-                canvas.id = id;
-                canvas.width = 160;
-                canvas.height = 100;
-                el.replaceWith(canvas);
-            }
-        });
-    }
 
     // ---- Time Range ----
     function setTimeRange(seconds) {
