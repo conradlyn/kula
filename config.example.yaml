@@ -24,6 +24,10 @@ web:
   listen: "0.0.0.0"
   port: 8080
 
+  # Join data points across gaps in the graphs (default: false)
+  # When false, gaps between measurements are displayed as empty space
+  join_metrics: false
+
   # Authentication (optional)
   auth:
     enabled: false

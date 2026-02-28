@@ -18,7 +18,42 @@ import (
 	"kula-szpiegula/internal/web"
 )
 
+var version = "0.1.0"
+
+func init() {
+	if data, err := os.ReadFile("VERSION"); err == nil {
+		if v := strings.TrimSpace(string(data)); v != "" {
+			version = v
+		}
+	}
+}
+
+func printUsage() {
+	fmt.Fprintf(os.Stderr, `Kula-Szpiegula v%s — Lightweight Linux Server Monitor
+
+Usage:
+  kula [flags] [command]
+
+Commands:
+  serve          Start the monitoring daemon with web UI (default)
+  tui            Launch the terminal UI dashboard
+  hash-password  Generate a Whirlpool password hash for config
+
+Flags:
+  -config string  Path to configuration file (default "config.yaml")
+  -h, --help      Show this help message
+
+Examples:
+  kula                              Start with default config
+  kula -config /etc/kula/config.yaml serve
+  kula tui
+  kula hash-password
+
+`, version)
+}
+
 func main() {
+	flag.Usage = printUsage
 	configPath := flag.String("config", "config.yaml", "path to configuration file")
 	flag.Parse()
 
@@ -55,6 +90,7 @@ func main() {
 }
 
 func runServe(cfg *config.Config) {
+	cfg.Web.Version = version
 	coll := collector.New()
 
 	store, err := storage.NewStore(cfg.Storage)

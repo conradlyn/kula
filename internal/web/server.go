@@ -141,7 +141,8 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 	info := map[string]interface{}{
 		"auth_enabled": s.cfg.Auth.Enabled,
-		"version":      "0.1.0",
+		"version":      s.cfg.Version,
+		"join_metrics": s.cfg.JoinMetrics,
 	}
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(info)

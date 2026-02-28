@@ -5,7 +5,7 @@ All notable changes to this project will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [Unreleased]
+## [0.2.0] - 2026-02-28
 
 ### Added
 
@@ -14,6 +14,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Man page
 - Bash completion
 - Docker integration
+- Unit tests
+- Focus mode
+- New config option: web.join_metrics (default false)
+- VERSION file
+
+### Changed
+
+- Fixed: missing usage info in --help
+- Pause stream on graph hover/zoom
+- Do not display decimal point values for PPS and Disk I/O
+- Do not join metrics (leave gaps for non-existing metrics)
+- Clickable header
+- Hardcoded version replaced with reading VERSION file
+- Alert icon greyed out while no alerts raised
 
 ## [0.1.0] - 2026-02-27
 

@@ -10,6 +10,9 @@
     const state = {
         ws: null,
         paused: false,
+        pausedManual: false,
+        pausedHover: false,
+        pausedZoom: false,
         connected: false,
         charts: {},
         timeRange: 300, // seconds, null when custom range
@@ -25,6 +28,10 @@
         alertDropdownOpen: false,
         layoutMode: localStorage.getItem('kula_layout') || 'grid',
         lastSample: null,
+        joinMetrics: false, // fetched from server config
+        focusMode: false,
+        focusSelecting: false,
+        focusVisible: JSON.parse(localStorage.getItem('kula_focus_visible') || 'null'),
     };
 
     // ---- Color Palette ----
@@ -192,7 +199,7 @@
     }
 
     // ---- Chart Initialization ----
-    function createTimeSeriesChart(canvasId, datasets, yConfig = {}) {
+    function createTimeSeriesChart(canvasId, datasets, yConfig = {}, extraPlugins = {}) {
         const ctx = document.getElementById(canvasId);
         if (!ctx) return null;
 
@@ -203,7 +210,7 @@
                 responsive: true,
                 maintainAspectRatio: false,
                 interaction: { mode: 'index', intersect: false },
-                spanGaps: false,
+                spanGaps: state.joinMetrics,
                 plugins: {
                     legend: { position: 'top', align: 'end' },
                     zoom: {
@@ -211,9 +218,16 @@
                         zoom: {
                             drag: { enabled: true, backgroundColor: 'rgba(59,130,246,0.1)', borderColor: colors.blue, borderWidth: 1 },
                             mode: 'x',
-                            onZoom: ({ chart }) => syncZoom(chart),
+                            onZoom: ({ chart }) => {
+                                syncZoom(chart);
+                                if (!state.pausedZoom) {
+                                    state.pausedZoom = true;
+                                    syncPauseState();
+                                }
+                            },
                         },
                     },
+                    tooltip: extraPlugins.tooltip || {},
                 },
                 scales: {
                     x: {
@@ -291,7 +305,9 @@
         state.charts.pps = createTimeSeriesChart('chart-pps', [
             { label: '↓ RX pps', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
             { label: '↑ TX pps', borderColor: colors.orange, backgroundColor: colors.orangeAlpha, fill: true, data: [] },
-        ], { ticks: { callback: v => formatPPS(v) } });
+        ], { ticks: { callback: v => formatPPS(v) } }, {
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + formatPPS(Math.round(ctx.parsed.y)) } }
+        });
 
         // Connections
         state.charts.connections = createTimeSeriesChart('chart-connections', [
@@ -305,7 +321,9 @@
         state.charts.diskio = createTimeSeriesChart('chart-disk-io', [
             { label: 'Read', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
             { label: 'Write', borderColor: colors.orange, backgroundColor: colors.orangeAlpha, fill: true, data: [] },
-        ], { ticks: { callback: v => formatBytesShort(v) + '/s' } });
+        ], { ticks: { callback: v => formatBytesShort(v) + '/s' } }, {
+            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s' } }
+        });
 
         // Disk Utilization
         state.charts.diskutil = createTimeSeriesChart('chart-disk-util', [
@@ -572,6 +590,11 @@
             delete chart.options.scales.x.max;
             chart.update('none');
         });
+        // Resume from zoom-pause
+        if (state.pausedZoom) {
+            state.pausedZoom = false;
+            syncPauseState();
+        }
     }
 
     // ---- Alert System ----
@@ -619,9 +642,11 @@
             badge.textContent = state.alerts.length;
             badge.classList.remove('hidden');
             btn.classList.add('has-alerts');
+            btn.classList.remove('no-alerts');
         } else {
             badge.classList.add('hidden');
             btn.classList.remove('has-alerts');
+            btn.classList.add('no-alerts');
         }
 
         // Render alert items
@@ -766,15 +791,22 @@
     }
 
     // ---- Pause/Resume ----
-    function togglePause() {
-        state.paused = !state.paused;
-        const btn = document.getElementById('btn-pause');
-        btn.textContent = state.paused ? '▶' : '⏸';
-        btn.classList.toggle('paused', state.paused);
-
-        if (state.ws?.readyState === WebSocket.OPEN) {
-            state.ws.send(JSON.stringify({ action: state.paused ? 'pause' : 'resume' }));
+    function syncPauseState() {
+        const shouldPause = state.pausedManual || state.pausedHover || state.pausedZoom;
+        if (shouldPause !== state.paused) {
+            state.paused = shouldPause;
+            const btn = document.getElementById('btn-pause');
+            btn.textContent = state.paused ? '▶' : '⏸';
+            btn.classList.toggle('paused', state.paused);
+            if (state.ws?.readyState === WebSocket.OPEN) {
+                state.ws.send(JSON.stringify({ action: state.paused ? 'pause' : 'resume' }));
+            }
         }
+    }
+
+    function togglePause() {
+        state.pausedManual = !state.pausedManual;
+        syncPauseState();
     }
 
     // ---- Layout Toggle ----
@@ -887,7 +919,12 @@
                 state.dataBuffer = [];
 
                 // Batch add all historical points WITHOUT chart.update() per sample
-                data.forEach(item => {
+                const processed = insertGapsInHistory(data);
+                processed.forEach(item => {
+                    if (item._gap) {
+                        addGapToCharts(new Date(item.ts));
+                        return;
+                    }
                     const sample = item.data || item;
                     const ts = new Date(sample.ts);
                     state.dataBuffer.push(sample);
@@ -933,7 +970,12 @@
                 state.dataBuffer = [];
 
                 if (Array.isArray(data) && data.length > 0) {
-                    data.forEach(item => {
+                    const processed = insertGapsInHistory(data);
+                    processed.forEach(item => {
+                        if (item._gap) {
+                            addGapToCharts(new Date(item.ts));
+                            return;
+                        }
                         const sample = item.data || item;
                         const ts = new Date(sample.ts);
                         state.dataBuffer.push(sample);
@@ -1075,15 +1117,217 @@
         return Math.round(v) + ' pps';
     }
 
+    // ---- Gap Insertion ----
+    function insertGapsInHistory(data) {
+        if (state.joinMetrics || data.length < 2) return data;
+
+        // Estimate expected interval from first two points
+        const t0 = new Date(data[0].ts || data[0].data?.ts).getTime();
+        const t1 = new Date(data[1].ts || data[1].data?.ts).getTime();
+        const expectedInterval = Math.abs(t1 - t0) || 1000;
+        const gapThreshold = expectedInterval * 2.5;
+
+        const result = [];
+        for (let i = 0; i < data.length; i++) {
+            result.push(data[i]);
+            if (i < data.length - 1) {
+                const curTs = new Date(data[i].ts || data[i].data?.ts).getTime();
+                const nextTs = new Date(data[i + 1].ts || data[i + 1].data?.ts).getTime();
+                if (nextTs - curTs > gapThreshold) {
+                    // Insert a null gap marker
+                    result.push({ _gap: true, ts: new Date(curTs + expectedInterval).toISOString() });
+                }
+            }
+        }
+        return result;
+    }
+
+    function addGapToCharts(ts) {
+        const nullPoint = { x: ts, y: null };
+        Object.values(state.charts).forEach(chart => {
+            if (!chart?.data?.datasets) return;
+            chart.data.datasets.forEach(ds => {
+                if (Array.isArray(ds.data)) ds.data.push(nullPoint);
+            });
+        });
+    }
+
+    // ---- Hover Pause ----
+    function setupHoverPause() {
+        document.querySelectorAll('.chart-card').forEach(card => {
+            card.addEventListener('mouseenter', () => {
+                if (!state.pausedHover) {
+                    state.pausedHover = true;
+                    syncPauseState();
+                }
+            });
+            card.addEventListener('mouseleave', () => {
+                if (state.pausedHover) {
+                    state.pausedHover = false;
+                    syncPauseState();
+                }
+            });
+        });
+    }
+
+    // ---- Focus Mode ----
+    const chartCardIds = [
+        'card-cpu', 'card-loadavg', 'card-memory', 'card-swap',
+        'card-network', 'card-pps', 'card-connections',
+        'card-disk-io', 'card-disk-util', 'card-disk-space',
+        'card-processes', 'card-entropy', 'card-self'
+    ];
+
+    function toggleFocusMode() {
+        const grid = document.getElementById('charts-grid');
+        const btn = document.getElementById('btn-focus');
+
+        if (state.focusMode && !state.focusSelecting) {
+            // Exit focus mode
+            state.focusMode = false;
+            grid.classList.remove('focus-active', 'focus-selecting');
+            btn.classList.remove('focus-active');
+            chartCardIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.remove('focus-visible', 'focus-selected');
+            });
+            removeFocusBar();
+            localStorage.removeItem('kula_focus_visible');
+            state.focusVisible = null;
+            return;
+        }
+
+        if (state.focusSelecting) {
+            // Apply selection
+            const selected = [];
+            chartCardIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el?.classList.contains('focus-selected')) selected.push(id);
+            });
+
+            if (selected.length === 0) {
+                // No selection = exit
+                state.focusMode = false;
+                state.focusSelecting = false;
+                grid.classList.remove('focus-active', 'focus-selecting');
+                btn.classList.remove('focus-active');
+                removeFocusBar();
+                return;
+            }
+
+            state.focusVisible = selected;
+            localStorage.setItem('kula_focus_visible', JSON.stringify(selected));
+            state.focusSelecting = false;
+            grid.classList.remove('focus-selecting');
+            grid.classList.add('focus-active');
+            chartCardIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) {
+                    el.classList.toggle('focus-visible', selected.includes(id));
+                    el.classList.remove('focus-selected');
+                }
+            });
+            removeFocusBar();
+            return;
+        }
+
+        // Enter selection mode
+        state.focusMode = true;
+        state.focusSelecting = true;
+        grid.classList.add('focus-selecting');
+        grid.classList.remove('focus-active');
+        btn.classList.add('focus-active');
+
+        // Pre-select previously visible cards
+        chartCardIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                if (state.focusVisible?.includes(id)) {
+                    el.classList.add('focus-selected');
+                } else {
+                    el.classList.remove('focus-selected');
+                }
+            }
+        });
+
+        showFocusBar();
+
+        // Click handler for selection
+        chartCardIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+                el._focusClick = () => el.classList.toggle('focus-selected');
+                el.addEventListener('click', el._focusClick);
+            }
+        });
+    }
+
+    function showFocusBar() {
+        removeFocusBar();
+        const bar = document.createElement('div');
+        bar.className = 'focus-bar';
+        bar.id = 'focus-bar';
+        bar.innerHTML = '<span>Select graphs to display, then click Done</span><button id="btn-focus-done">Done</button><button id="btn-focus-cancel">Cancel</button>';
+        const grid = document.getElementById('charts-grid');
+        grid.parentNode.insertBefore(bar, grid);
+        document.getElementById('btn-focus-done').addEventListener('click', toggleFocusMode);
+        document.getElementById('btn-focus-cancel').addEventListener('click', () => {
+            state.focusSelecting = false;
+            state.focusMode = false;
+            const g = document.getElementById('charts-grid');
+            g.classList.remove('focus-selecting', 'focus-active');
+            document.getElementById('btn-focus').classList.remove('focus-active');
+            chartCardIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) { el.classList.remove('focus-selected'); if (el._focusClick) el.removeEventListener('click', el._focusClick); }
+            });
+            removeFocusBar();
+        });
+    }
+
+    function removeFocusBar() {
+        const bar = document.getElementById('focus-bar');
+        if (bar) bar.remove();
+        chartCardIds.forEach(id => {
+            const el = document.getElementById(id);
+            if (el?._focusClick) { el.removeEventListener('click', el._focusClick); delete el._focusClick; }
+        });
+    }
+
+    function applyStoredFocusMode() {
+        if (state.focusVisible && state.focusVisible.length > 0) {
+            state.focusMode = true;
+            const grid = document.getElementById('charts-grid');
+            grid.classList.add('focus-active');
+            document.getElementById('btn-focus').classList.add('focus-active');
+            chartCardIds.forEach(id => {
+                const el = document.getElementById(id);
+                if (el) el.classList.toggle('focus-visible', state.focusVisible.includes(id));
+            });
+        }
+    }
+
     // ---- Init ----
     function init() {
+        // Fetch server config for join_metrics
+        fetch('/api/config')
+            .then(r => r.json())
+            .then(cfg => {
+                if (cfg.join_metrics !== undefined) state.joinMetrics = cfg.join_metrics;
+            })
+            .catch(() => { });
+
         // Apply stored layout
         applyLayout();
+
+        // Apply stored focus mode
+        applyStoredFocusMode();
 
         // Event listeners
         document.getElementById('btn-pause').addEventListener('click', togglePause);
         document.getElementById('btn-layout').addEventListener('click', toggleLayout);
         document.getElementById('btn-alerts').addEventListener('click', toggleAlertDropdown);
+        document.getElementById('btn-focus').addEventListener('click', toggleFocusMode);
         document.getElementById('login-form').addEventListener('submit', handleLogin);
         document.getElementById('btn-custom-range').addEventListener('click', toggleCustomTimePicker);
         document.getElementById('btn-apply-custom').addEventListener('click', applyCustomRange);
@@ -1096,6 +1340,9 @@
         document.querySelectorAll('.chart-body canvas').forEach(canvas => {
             canvas.addEventListener('dblclick', resetZoomAll);
         });
+
+        // Hover-pause on chart cards
+        setupHoverPause();
 
         // Close alert dropdown when clicking outside
         document.addEventListener('click', (e) => {

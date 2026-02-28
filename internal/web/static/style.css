@@ -153,6 +153,17 @@ body {
 .logo { font-size: 1.5rem; }
 .header h1 { font-size: 1.1rem; font-weight: 600; letter-spacing: -0.02em; }
 
+.header-link {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
+    text-decoration: none;
+    color: inherit;
+    transition: opacity 0.15s;
+}
+
+.header-link:hover { opacity: 0.8; }
+
 .hostname {
     padding: 0.2rem 0.6rem;
     background: rgba(59, 130, 246, 0.15);
@@ -234,6 +245,11 @@ body {
 
 .btn-alert {
     position: relative;
+}
+
+.btn-alert.no-alerts {
+    opacity: 0.35;
+    filter: grayscale(1);
 }
 
 .btn-alert.has-alerts {
@@ -568,6 +584,76 @@ body {
 
 .layout-list .chart-body {
     height: 260px;
+}
+
+/* ---- Focus Mode ---- */
+.focus-active .chart-card {
+    display: none;
+}
+
+.focus-active .chart-card.focus-visible {
+    display: block;
+}
+
+.focus-selecting .chart-card {
+    display: block !important;
+    cursor: pointer;
+    position: relative;
+}
+
+.focus-selecting .chart-card::after {
+    content: '';
+    position: absolute;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.5);
+    border-radius: var(--radius);
+    z-index: 10;
+    pointer-events: none;
+    transition: background 0.15s;
+}
+
+.focus-selecting .chart-card.focus-selected::after {
+    background: rgba(59, 130, 246, 0.15);
+    border: 2px solid var(--accent-blue);
+}
+
+.focus-selecting .chart-card.focus-selected {
+    border-color: var(--accent-blue);
+    box-shadow: 0 0 12px rgba(59, 130, 246, 0.3);
+}
+
+.focus-bar {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 0.75rem;
+    padding: 0.5rem 1.5rem;
+    background: rgba(59, 130, 246, 0.1);
+    border-bottom: 1px solid var(--accent-blue);
+    font-size: 0.85rem;
+    color: var(--accent-blue);
+}
+
+.focus-bar button {
+    padding: 0.3rem 1rem;
+    border: 1px solid var(--accent-blue);
+    border-radius: var(--radius-sm);
+    background: rgba(59, 130, 246, 0.15);
+    color: var(--accent-blue);
+    cursor: pointer;
+    font-size: 0.8rem;
+    font-weight: 500;
+    transition: all 0.15s;
+}
+
+.focus-bar button:hover {
+    background: rgba(59, 130, 246, 0.3);
+}
+
+.btn-icon.focus-active {
+    border-color: var(--accent-blue);
+    color: var(--accent-blue);
+    background: rgba(59, 130, 246, 0.1);
 }
 
 /* ---- Footer ---- */

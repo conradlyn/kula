@@ -32,10 +32,12 @@ type TierConfig struct {
 }
 
 type WebConfig struct {
-	Enabled bool       `yaml:"enabled"`
-	Listen  string     `yaml:"listen"`
-	Port    int        `yaml:"port"`
-	Auth    AuthConfig `yaml:"auth"`
+	Enabled     bool       `yaml:"enabled"`
+	Listen      string     `yaml:"listen"`
+	Port        int        `yaml:"port"`
+	Auth        AuthConfig `yaml:"auth"`
+	JoinMetrics bool       `yaml:"join_metrics"`
+	Version     string     `yaml:"-"` // injected at runtime, not from config file
 }
 
 type AuthConfig struct {
