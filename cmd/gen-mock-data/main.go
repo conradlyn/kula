@@ -44,7 +44,11 @@ func main() {
 	if err != nil {
 		log.Fatalf("Failed to initialize storage: %v", err)
 	}
-	defer store.Close()
+	defer func() {
+		if err := store.Close(); err != nil {
+			log.Printf("Error closing storage: %v", err)
+		}
+	}()
 
 	totalSamples := *days * 24 * 60 * 60
 	fmt.Printf("Generating %d samples (%d days of 1s resolution)...\n", totalSamples, *days)
@@ -54,11 +58,11 @@ func main() {
 	startTime := now.Add(-time.Duration(totalSamples) * time.Second)
 
 	// To make the data look somewhat realistic, we can use a basic random walk or sine wave
-	var cpuUsage float64 = 5.0
+	cpuUsage := 5.0
 	var memUsed uint64 = 500 * 1024 * 1024 // 500MB
 	memTotal := uint64(8 * 1024 * 1024 * 1024)
 
-	rand.Seed(time.Now().UnixNano())
+	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
 
 	startGenTime := time.Now()
 
@@ -66,7 +70,7 @@ func main() {
 		ts := startTime.Add(time.Duration(i) * time.Second)
 
 		// Jitter
-		cpuUsage += rand.Float64()*4 - 2 // [-2, 2]
+		cpuUsage += rng.Float64()*4 - 2 // [-2, 2]
 		if cpuUsage < 0 {
 			cpuUsage = 0
 		}
@@ -74,7 +78,7 @@ func main() {
 			cpuUsage = 100
 		}
 
-		memUsed = uint64(float64(memUsed) + (rand.Float64()*10-5)*1024*1024)
+		memUsed = uint64(float64(memUsed) + (rng.Float64()*10-5)*1024*1024)
 		if memUsed < 100*1024*1024 {
 			memUsed = 100 * 1024 * 1024
 		}

@@ -174,7 +174,7 @@ func readPasswordWithAsterisks() string {
 		password, _ := reader.ReadString('\n')
 		return strings.TrimSpace(password)
 	}
-	defer term.Restore(fd, oldState)
+	defer func() { _ = term.Restore(fd, oldState) }()
 
 	var password []byte
 	b := make([]byte, 1)
@@ -190,7 +190,7 @@ func readPasswordWithAsterisks() string {
 		}
 
 		if b[0] == 3 { // Ctrl+C
-			term.Restore(fd, oldState)
+			_ = term.Restore(fd, oldState)
 			os.Exit(1)
 		}
 
