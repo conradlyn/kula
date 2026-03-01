@@ -102,7 +102,10 @@ func TestSessionLifecycle(t *testing.T) {
 		SessionTimeout: time.Hour,
 	})
 
-	token := am.CreateSession("admin")
+	token, err := am.CreateSession("admin")
+	if err != nil {
+		t.Fatalf("CreateSession error: %v", err)
+	}
 	if token == "" {
 		t.Fatal("CreateSession returned empty token")
 	}
@@ -120,7 +123,7 @@ func TestSessionExpiry(t *testing.T) {
 		SessionTimeout: time.Millisecond, // very short timeout
 	})
 
-	token := am.CreateSession("admin")
+	token, _ := am.CreateSession("admin")
 	time.Sleep(5 * time.Millisecond)
 	if am.ValidateSession(token) {
 		t.Error("Expired session should not validate")
@@ -133,8 +136,8 @@ func TestCleanupSessions(t *testing.T) {
 		SessionTimeout: time.Millisecond,
 	})
 
-	am.CreateSession("user1")
-	am.CreateSession("user2")
+	_, _ = am.CreateSession("user1")
+	_, _ = am.CreateSession("user2")
 	time.Sleep(5 * time.Millisecond)
 	am.CleanupSessions()
 
@@ -185,7 +188,7 @@ func TestAuthMiddlewareValidCookie(t *testing.T) {
 		Enabled:        true,
 		SessionTimeout: time.Hour,
 	})
-	token := am.CreateSession("admin")
+	token, _ := am.CreateSession("admin")
 
 	handler := am.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)
@@ -206,7 +209,7 @@ func TestAuthMiddlewareBearerToken(t *testing.T) {
 		Enabled:        true,
 		SessionTimeout: time.Hour,
 	})
-	token := am.CreateSession("admin")
+	token, _ := am.CreateSession("admin")
 
 	handler := am.AuthMiddleware(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

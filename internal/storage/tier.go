@@ -49,7 +49,7 @@ func OpenTier(path string, maxSize int64) (*Tier, error) {
 		return nil, fmt.Errorf("max_size too small for tier: %d", maxSize)
 	}
 
-	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0644)
+	f, err := os.OpenFile(path, os.O_RDWR|os.O_CREATE, 0600)
 	if err != nil {
 		return nil, fmt.Errorf("opening tier file: %w", err)
 	}

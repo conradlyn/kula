@@ -96,6 +96,15 @@ func loggingMiddleware(cfg config.LogConfig, next http.Handler) http.Handler {
 	})
 }
 
+func securityMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("X-Content-Type-Options", "nosniff")
+		w.Header().Set("X-Frame-Options", "DENY")
+		w.Header().Set("Content-Security-Policy", "default-src 'self' 'unsafe-inline'; style-src 'self' fonts.googleapis.com; font-src fonts.gstatic.com; script-src 'self' cdn.jsdelivr.net; connect-src 'self' cdn.jsdelivr.net ws: wss:;")
+		next.ServeHTTP(w, r)
+	})
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -140,7 +149,7 @@ func (s *Server) Start() error {
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Listen, s.cfg.Port)
 	log.Printf("Web UI starting on http://%s", addr)
-	return http.ListenAndServe(addr, mux)
+	return http.ListenAndServe(addr, securityMiddleware(mux))
 }
 
 func (s *Server) handleCurrent(w http.ResponseWriter, r *http.Request) {
@@ -180,6 +189,15 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 			http.Error(w, `{"error":"invalid 'from' time"}`, http.StatusBadRequest)
 			return
 		}
+	}
+
+	if to.Sub(from) > 31*24*time.Hour {
+		http.Error(w, `{"error":"time range too large, max 31 days allowed"}`, http.StatusBadRequest)
+		return
+	}
+	if to.Sub(from) < 0 {
+		http.Error(w, `{"error":"time range inverted"}`, http.StatusBadRequest)
+		return
 	}
 
 	startLoad := time.Now()
@@ -232,7 +250,11 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token := s.auth.CreateSession(creds.Username)
+	token, err := s.auth.CreateSession(creds.Username)
+	if err != nil {
+		http.Error(w, `{"error":"internal server error"}`, http.StatusInternalServerError)
+		return
+	}
 
 	http.SetCookie(w, &http.Cookie{
 		Name:     "kula_session",

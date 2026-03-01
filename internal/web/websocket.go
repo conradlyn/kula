@@ -19,6 +19,8 @@ type wsClient struct {
 
 func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 	wsHandler := websocket.Handler(func(conn *websocket.Conn) {
+		conn.MaxPayloadBytes = 4096 // Limit message size to prevent memory exhaustion
+
 		client := &wsClient{
 			conn:   conn,
 			sendCh: make(chan []byte, 64),

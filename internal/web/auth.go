@@ -66,34 +66,40 @@ func (a *AuthManager) ValidateCredentials(username, password string) bool {
 }
 
 // CreateSession creates a new authenticated session.
-func (a *AuthManager) CreateSession(username string) string {
+func (a *AuthManager) CreateSession(username string) (string, error) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 
-	token := generateToken()
+	token, err := generateToken()
+	if err != nil {
+		return "", err
+	}
 	a.sessions[token] = &session{
 		username:  username,
 		createdAt: time.Now(),
 		expiresAt: time.Now().Add(a.cfg.SessionTimeout),
 	}
 
-	return token
+	return token, nil
 }
 
 // ValidateSession checks if a session token is valid.
 func (a *AuthManager) ValidateSession(token string) bool {
 	a.mu.RLock()
-	defer a.mu.RUnlock()
-
 	sess, ok := a.sessions[token]
 	if !ok {
+		a.mu.RUnlock()
 		return false
 	}
 
 	if time.Now().After(sess.expiresAt) {
+		a.mu.RUnlock()
+		a.mu.Lock()
 		delete(a.sessions, token)
+		a.mu.Unlock()
 		return false
 	}
+	a.mu.RUnlock()
 
 	return true
 }
@@ -140,13 +146,12 @@ func (a *AuthManager) CleanupSessions() {
 	}
 }
 
-func generateToken() string {
+func generateToken() (string, error) {
 	b := make([]byte, 32)
 	if _, err := rand.Read(b); err != nil {
-		// Fallback: this should never happen with crypto/rand
-		panic("crypto/rand.Read failed: " + err.Error())
+		return "", fmt.Errorf("crypto/rand.Read failed: %w", err)
 	}
-	return hex.EncodeToString(b)
+	return hex.EncodeToString(b), nil
 }
 
 // PrintHashedPassword generates and prints a hash for a password.
