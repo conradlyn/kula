@@ -1,10 +1,20 @@
-# 🔮 Kula-Szpiegula
+<div align="center">
+
+# 🔮 Kula
 
 **Lightweight, self-contained Linux® server monitoring tool.**
+
+![Go](https://img.shields.io/badge/made%20for-linux-yellow?logo=linux&logoColor=ffffff)
+![Go](https://img.shields.io/badge/go%20go-power%20rangers-blue?logo=go&logoColor=ffffff)
+![JS](https://img.shields.io/badge/some%20-js-orange?logo=javascript&logoColor=ffffff)
+![JS](https://img.shields.io/badge/and%20a%20pinch%20of-bash-green?logo=linux&logoColor=ffffff)
+[![License: GPL v3](https://img.shields.io/badge/License-AGPLv3-red.svg)](https://www.gnu.org/licenses/agpl-3.0)
 
 Zero dependencies. No external databases. Single binary. Just deploy and go.
 
 <img width="1078" height="770" alt="image" src="https://github.com/user-attachments/assets/749b2bd1-c16f-4616-8a39-e59a5e635d2d" />
+
+</div>
 
 ---
 
