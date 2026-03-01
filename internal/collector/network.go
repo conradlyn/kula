@@ -40,14 +40,14 @@ func parseNetDev() map[string]netRaw {
 			continue
 		}
 		n := netRaw{}
-		n.rxBytes, _ = strconv.ParseUint(fields[0], 10, 64)
-		n.rxPkts, _ = strconv.ParseUint(fields[1], 10, 64)
-		n.rxErrs, _ = strconv.ParseUint(fields[2], 10, 64)
-		n.rxDrop, _ = strconv.ParseUint(fields[3], 10, 64)
-		n.txBytes, _ = strconv.ParseUint(fields[8], 10, 64)
-		n.txPkts, _ = strconv.ParseUint(fields[9], 10, 64)
-		n.txErrs, _ = strconv.ParseUint(fields[10], 10, 64)
-		n.txDrop, _ = strconv.ParseUint(fields[11], 10, 64)
+		n.rxBytes = parseUint(fields[0], 10, 64, "network.rxBytes")
+		n.rxPkts = parseUint(fields[1], 10, 64, "network.rxPkts")
+		n.rxErrs = parseUint(fields[2], 10, 64, "network.rxErrs")
+		n.rxDrop = parseUint(fields[3], 10, 64, "network.rxDrop")
+		n.txBytes = parseUint(fields[8], 10, 64, "network.txBytes")
+		n.txPkts = parseUint(fields[9], 10, 64, "network.txPkts")
+		n.txErrs = parseUint(fields[10], 10, 64, "network.txErrs")
+		n.txDrop = parseUint(fields[11], 10, 64, "network.txDrop")
 		result[name] = n
 	}
 	return result

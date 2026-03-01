@@ -40,13 +40,13 @@ func parseDiskStats() map[string]diskRaw {
 		}
 
 		d := diskRaw{}
-		d.reads, _ = strconv.ParseUint(fields[3], 10, 64)
-		d.readSect, _ = strconv.ParseUint(fields[5], 10, 64)
-		d.writes, _ = strconv.ParseUint(fields[7], 10, 64)
-		d.writeSect, _ = strconv.ParseUint(fields[9], 10, 64)
-		d.ioTime, _ = strconv.ParseUint(fields[12], 10, 64)
+		d.reads = parseUint(fields[3], 10, 64, "disk.reads")
+		d.readSect = parseUint(fields[5], 10, 64, "disk.readSect")
+		d.writes = parseUint(fields[7], 10, 64, "disk.writes")
+		d.writeSect = parseUint(fields[9], 10, 64, "disk.writeSect")
+		d.ioTime = parseUint(fields[12], 10, 64, "disk.ioTime")
 		if len(fields) > 13 {
-			d.weightedIO, _ = strconv.ParseUint(fields[13], 10, 64)
+			d.weightedIO = parseUint(fields[13], 10, 64, "disk.weightedIO")
 		}
 		result[name] = d
 	}

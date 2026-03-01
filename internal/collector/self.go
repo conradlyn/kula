@@ -8,8 +8,8 @@ import (
 )
 
 type selfRaw struct {
-	utime  uint64
-	stime  uint64
+	utime uint64
+	stime uint64
 }
 
 func (c *Collector) collectSelf(elapsed float64) SelfStats {
@@ -26,8 +26,8 @@ func (c *Collector) collectSelf(elapsed float64) SelfStats {
 			// utime is field index 11 (0-based from after state), stime is 12
 			if len(fields) > 12 {
 				cur := selfRaw{}
-				cur.utime, _ = strconv.ParseUint(fields[11], 10, 64)
-				cur.stime, _ = strconv.ParseUint(fields[12], 10, 64)
+				cur.utime = parseUint(fields[11], 10, 64, "self.utime")
+				cur.stime = parseUint(fields[12], 10, 64, "self.stime")
 
 				if c.prevSelf.utime > 0 && elapsed > 0 {
 					// Clock ticks per second is typically 100
@@ -47,11 +47,9 @@ func (c *Collector) collectSelf(elapsed float64) SelfStats {
 	if err == nil {
 		for _, line := range strings.Split(string(statusData), "\n") {
 			if strings.HasPrefix(line, "VmRSS:") {
-				val := parseStatusKB(line)
-				s.MemRSS = val * 1024
+				s.MemRSS = parseStatusKB(line, "self.rss") * 1024
 			} else if strings.HasPrefix(line, "VmSize:") {
-				val := parseStatusKB(line)
-				s.MemVMS = val * 1024
+				s.MemVMS = parseStatusKB(line, "self.vms") * 1024
 			} else if strings.HasPrefix(line, "Threads:") {
 				parts := strings.Fields(line)
 				if len(parts) >= 2 {
@@ -71,10 +69,10 @@ func (c *Collector) collectSelf(elapsed float64) SelfStats {
 	return s
 }
 
-func parseStatusKB(line string) uint64 {
+func parseStatusKB(line string, metricName string) uint64 {
 	parts := strings.Fields(line)
 	if len(parts) >= 2 {
-		val, _ := strconv.ParseUint(parts[1], 10, 64)
+		val := parseUint(parts[1], 10, 64, metricName)
 		return val
 	}
 	return 0

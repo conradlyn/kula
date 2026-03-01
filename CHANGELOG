@@ -13,6 +13,13 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
 - Fixed 100% CPU exhaustion in browser when switching to 1h time window
 
+### Security
+
+- Added rate limiting (max 5 attempts per 5 mins) to `/api/login` endpoint
+- Added strict absolute path validation to prevent directory traversal in storage config
+- Replaced silent parsing in `/proc` collectors with safe wrappers that explicitly log malformed data
+- Updated daemon to gracefully shut down open network listeners using `context.Context` signal catching
+
 ## [0.4.0] - 2026-03-01
 
 ### Added

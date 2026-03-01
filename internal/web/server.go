@@ -2,6 +2,7 @@ package web
 
 import (
 	"bufio"
+	"context"
 	"embed"
 	"encoding/json"
 	"fmt"
@@ -27,6 +28,7 @@ type Server struct {
 	store     *storage.Store
 	auth      *AuthManager
 	hub       *wsHub
+	httpSrv   *http.Server
 }
 
 func NewServer(cfg config.WebConfig, c *collector.Collector, s *storage.Store) *Server {
@@ -149,7 +151,24 @@ func (s *Server) Start() error {
 
 	addr := fmt.Sprintf("%s:%d", s.cfg.Listen, s.cfg.Port)
 	log.Printf("Web UI starting on http://%s", addr)
-	return http.ListenAndServe(addr, securityMiddleware(mux))
+
+	s.httpSrv = &http.Server{
+		Addr:    addr,
+		Handler: securityMiddleware(mux),
+	}
+
+	if err := s.httpSrv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
+		return err
+	}
+	return nil
+}
+
+// Shutdown gracefully stops the web server.
+func (s *Server) Shutdown(ctx context.Context) error {
+	if s.httpSrv != nil {
+		return s.httpSrv.Shutdown(ctx)
+	}
+	return nil
 }
 
 func (s *Server) handleCurrent(w http.ResponseWriter, r *http.Request) {
@@ -233,6 +252,16 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	ip := r.Header.Get("X-Forwarded-For")
+	if ip == "" {
+		ip = r.RemoteAddr
+	}
+
+	if !s.auth.Limiter.Allow(ip) {
+		http.Error(w, `{"error":"too many requests"}`, http.StatusTooManyRequests)
 		return
 	}
 

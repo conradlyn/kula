@@ -2,6 +2,7 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"flag"
 	"fmt"
 	"log"
@@ -107,9 +108,9 @@ func runServe(cfg *config.Config, configPath string) {
 
 	server := web.NewServer(cfg.Web, coll, store)
 
-	// Signal handling
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Signal handling with Context
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
 
 	// Collection loop
 	go func() {
@@ -123,12 +124,17 @@ func runServe(cfg *config.Config, configPath string) {
 		}
 		server.BroadcastSample(sample)
 
-		for range ticker.C {
-			sample := coll.Collect()
-			if err := store.WriteSample(sample); err != nil {
-				log.Printf("Storage write error: %v", err)
+		for {
+			select {
+			case <-ticker.C:
+				sample := coll.Collect()
+				if err := store.WriteSample(sample); err != nil {
+					log.Printf("Storage write error: %v", err)
+				}
+				server.BroadcastSample(sample)
+			case <-ctx.Done():
+				return
 			}
-			server.BroadcastSample(sample)
 		}
 	}()
 
@@ -140,8 +146,15 @@ func runServe(cfg *config.Config, configPath string) {
 	}()
 
 	log.Printf("Kula-Szpiegula started (collecting every %s)", cfg.Collection.Interval)
-	<-sigCh
+	<-ctx.Done()
+
 	log.Println("Shutting down...")
+
+	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	if err := server.Shutdown(shutdownCtx); err != nil {
+		log.Printf("Web server shutdown error: %v", err)
+	}
 }
 
 func runTUI(cfg *config.Config) {

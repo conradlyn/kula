@@ -25,12 +25,17 @@ type Store struct {
 }
 
 func NewStore(cfg config.StorageConfig) (*Store, error) {
-	if err := os.MkdirAll(cfg.Directory, 0755); err != nil {
+	absDir, err := filepath.Abs(cfg.Directory)
+	if err != nil {
+		return nil, fmt.Errorf("resolving storage directory: %w", err)
+	}
+
+	if err := os.MkdirAll(absDir, 0755); err != nil {
 		return nil, fmt.Errorf("creating storage directory: %w", err)
 	}
 
 	s := &Store{
-		dir:     cfg.Directory,
+		dir:     absDir,
 		configs: cfg.Tiers,
 	}
 

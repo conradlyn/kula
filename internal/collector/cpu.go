@@ -33,27 +33,27 @@ func parseProcStat() []cpuRaw {
 			continue
 		}
 		r := cpuRaw{id: fields[0]}
-		r.user, _ = strconv.ParseUint(fields[1], 10, 64)
-		r.nice, _ = strconv.ParseUint(fields[2], 10, 64)
-		r.system, _ = strconv.ParseUint(fields[3], 10, 64)
-		r.idle, _ = strconv.ParseUint(fields[4], 10, 64)
+		r.user = parseUint(fields[1], 10, 64, "cpu.user")
+		r.nice = parseUint(fields[2], 10, 64, "cpu.nice")
+		r.system = parseUint(fields[3], 10, 64, "cpu.system")
+		r.idle = parseUint(fields[4], 10, 64, "cpu.idle")
 		if len(fields) > 5 {
-			r.iowait, _ = strconv.ParseUint(fields[5], 10, 64)
+			r.iowait = parseUint(fields[5], 10, 64, "cpu.iowait")
 		}
 		if len(fields) > 6 {
-			r.irq, _ = strconv.ParseUint(fields[6], 10, 64)
+			r.irq = parseUint(fields[6], 10, 64, "cpu.irq")
 		}
 		if len(fields) > 7 {
-			r.softirq, _ = strconv.ParseUint(fields[7], 10, 64)
+			r.softirq = parseUint(fields[7], 10, 64, "cpu.softirq")
 		}
 		if len(fields) > 8 {
-			r.steal, _ = strconv.ParseUint(fields[8], 10, 64)
+			r.steal = parseUint(fields[8], 10, 64, "cpu.steal")
 		}
 		if len(fields) > 9 {
-			r.guest, _ = strconv.ParseUint(fields[9], 10, 64)
+			r.guest = parseUint(fields[9], 10, 64, "cpu.guest")
 		}
 		if len(fields) > 10 {
-			r.guestNice, _ = strconv.ParseUint(fields[10], 10, 64)
+			r.guestNice = parseUint(fields[10], 10, 64, "cpu.guest_nice")
 		}
 		result = append(result, r)
 	}
@@ -137,9 +137,9 @@ func collectLoadAvg() LoadAvg {
 		return LoadAvg{}
 	}
 	la := LoadAvg{}
-	la.Load1, _ = strconv.ParseFloat(fields[0], 64)
-	la.Load5, _ = strconv.ParseFloat(fields[1], 64)
-	la.Load15, _ = strconv.ParseFloat(fields[2], 64)
+	la.Load1 = parseFloat(fields[0], 64, "loadavg.1")
+	la.Load5 = parseFloat(fields[1], 64, "loadavg.5")
+	la.Load15 = parseFloat(fields[2], 64, "loadavg.15")
 
 	parts := strings.Split(fields[3], "/")
 	if len(parts) == 2 {

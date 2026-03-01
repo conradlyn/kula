@@ -195,6 +195,27 @@ sudo cp -r addons/init/runit/kula /etc/sv/
 sudo ln -s /etc/sv/kula /var/service/
 ```
 
+### Running behind reverse proxy (nginx)
+
+```nginx
+server {
+    listen 80 ;
+    listen [::]:80 ;
+    server_name kula.localhost;
+
+    location / {
+        proxy_pass http://localhost:8080;
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection "upgrade";
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+}
+```
+
 ---
 
 ## Configuration

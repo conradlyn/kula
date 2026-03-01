@@ -20,6 +20,13 @@ type AuthManager struct {
 	mu       sync.RWMutex
 	cfg      config.AuthConfig
 	sessions map[string]*session
+	Limiter  *RateLimiter
+}
+
+// RateLimiter tracks recent rapid login attempts by IP.
+type RateLimiter struct {
+	mu       sync.Mutex
+	attempts map[string][]time.Time
 }
 
 type session struct {
@@ -32,7 +39,33 @@ func NewAuthManager(cfg config.AuthConfig) *AuthManager {
 	return &AuthManager{
 		cfg:      cfg,
 		sessions: make(map[string]*session),
+		Limiter: &RateLimiter{
+			attempts: make(map[string][]time.Time),
+		},
 	}
+}
+
+// Allow checks if the given IP has exceeded 5 login attempts in the last 5 minutes.
+func (rl *RateLimiter) Allow(ip string) bool {
+	rl.mu.Lock()
+	defer rl.mu.Unlock()
+
+	now := time.Now()
+	cutoff := now.Add(-5 * time.Minute)
+
+	var recent []time.Time
+	for _, t := range rl.attempts[ip] {
+		if t.After(cutoff) {
+			recent = append(recent, t)
+		}
+	}
+
+	if len(recent) >= 5 {
+		return false
+	}
+
+	rl.attempts[ip] = append(recent, now)
+	return true
 }
 
 // HashPassword creates an Argon2id hash with the given salt.

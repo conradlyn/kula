@@ -18,7 +18,7 @@ func collectSystem() SystemStats {
 	if data, err := os.ReadFile("/proc/uptime"); err == nil {
 		fields := strings.Fields(string(data))
 		if len(fields) >= 1 {
-			s.Uptime, _ = strconv.ParseFloat(fields[0], 64)
+			s.Uptime = parseFloat(fields[0], 64, "system.uptime")
 			s.UptimeHuman = formatUptime(s.Uptime)
 		}
 	}
