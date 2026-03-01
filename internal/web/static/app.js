@@ -836,6 +836,7 @@
     function fetchHistory(rangeSeconds) {
         if (state.loadingHistory) return;
         state.loadingHistory = true;
+        document.getElementById('loading-spinner')?.classList.remove('hidden');
 
         const to = new Date().toISOString();
         const from = new Date(Date.now() - rangeSeconds * 1000).toISOString();
@@ -855,6 +856,7 @@
                     setChartTimeRange();
                     updateAllCharts();
                     state.loadingHistory = false;
+                    document.getElementById('loading-spinner')?.classList.add('hidden');
                     return;
                 }
 
@@ -894,16 +896,19 @@
                 evaluateAlerts(s);
 
                 state.loadingHistory = false;
+                document.getElementById('loading-spinner')?.classList.add('hidden');
             })
             .catch(e => {
                 console.error('History fetch error:', e);
                 state.loadingHistory = false;
+                document.getElementById('loading-spinner')?.classList.add('hidden');
             });
     }
 
     function fetchCustomHistory(fromDate, toDate) {
         if (state.loadingHistory) return;
         state.loadingHistory = true;
+        document.getElementById('loading-spinner')?.classList.remove('hidden');
 
         const from = fromDate.toISOString();
         const to = toDate.toISOString();
@@ -949,10 +954,12 @@
                 setChartTimeRange();
                 updateAllCharts();
                 state.loadingHistory = false;
+                document.getElementById('loading-spinner')?.classList.add('hidden');
             })
             .catch(e => {
                 console.error('Custom history fetch error:', e);
                 state.loadingHistory = false;
+                document.getElementById('loading-spinner')?.classList.add('hidden');
             });
     }
 

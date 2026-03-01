@@ -1,6 +1,7 @@
 package storage
 
 import (
+	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
@@ -223,10 +224,12 @@ func (t *Tier) ReadRange(from, to time.Time) ([]*AggregatedSample, error) {
 
 	for _, seg := range segments {
 		bytesRead := int64(0)
-		for bytesRead < seg.size {
-			readOff := seg.start + bytesRead
-			fileOff := headerSize + readOff
 
+		// Use buffered reader for drastic performance improvement over thousands of reads
+		sr := io.NewSectionReader(t.file, headerSize+seg.start, seg.size)
+		br := bufio.NewReaderSize(sr, 1024*1024)
+
+		for bytesRead < seg.size {
 			// Not enough room for a length prefix in this segment
 			if seg.size-bytesRead < 4 {
 				break
@@ -234,7 +237,7 @@ func (t *Tier) ReadRange(from, to time.Time) ([]*AggregatedSample, error) {
 
 			// Read length
 			lenBuf := make([]byte, 4)
-			if _, err := t.file.ReadAt(lenBuf, fileOff); err != nil {
+			if _, err := io.ReadFull(br, lenBuf); err != nil {
 				break
 			}
 			dataLen := binary.LittleEndian.Uint32(lenBuf)
@@ -252,22 +255,38 @@ func (t *Tier) ReadRange(from, to time.Time) ([]*AggregatedSample, error) {
 
 			// Read data
 			data := make([]byte, dataLen)
-			if _, err := t.file.ReadAt(data, fileOff+4); err != nil {
-				if err == io.EOF {
-					break
-				}
+			if _, err := io.ReadFull(br, data); err != nil {
 				break
 			}
 
+			// Pre-filter using fast timestamp extraction
+			ts, err := extractTimestamp(data)
+			if err != nil {
+				// Fallback to full decode if fast extraction fails
+				sample, err := decodeSample(data)
+				if err == nil {
+					if !sample.Timestamp.Before(from) && !sample.Timestamp.After(to) {
+						samples = append(samples, sample)
+					}
+				}
+				bytesRead += recordLen
+				continue
+			}
+
+			// Skip full decode if out of bounds
+			if ts.Before(from) || ts.After(to) {
+				bytesRead += recordLen
+				continue
+			}
+
+			// In bounds, do full decode
 			sample, err := decodeSample(data)
 			if err != nil {
 				bytesRead += recordLen
 				continue
 			}
 
-			if !sample.Timestamp.Before(from) && !sample.Timestamp.After(to) {
-				samples = append(samples, sample)
-			}
+			samples = append(samples, sample)
 
 			bytesRead += recordLen
 		}

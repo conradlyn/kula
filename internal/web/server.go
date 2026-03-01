@@ -1,11 +1,13 @@
 package web
 
 import (
+	"bufio"
 	"embed"
 	"encoding/json"
 	"fmt"
 	"io/fs"
 	"log"
+	"net"
 	"net/http"
 	"sync"
 	"time"
@@ -47,6 +49,42 @@ func (s *Server) BroadcastSample(sample *collector.Sample) {
 	s.hub.broadcast(data)
 }
 
+// statusResponseWriter captures the HTTP status code for logging.
+type statusResponseWriter struct {
+	http.ResponseWriter
+	status int
+}
+
+func (w *statusResponseWriter) WriteHeader(status int) {
+	w.status = status
+	w.ResponseWriter.WriteHeader(status)
+}
+
+// Hijack exposes the underlying http.Hijacker to allow WebSockets to upgrade the connection.
+func (w *statusResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
+	h, ok := w.ResponseWriter.(http.Hijacker)
+	if !ok {
+		return nil, nil, fmt.Errorf("underlying response writer does not support hijacking")
+	}
+	return h.Hijack()
+}
+
+func loggingMiddleware(next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		start := time.Now()
+		sw := &statusResponseWriter{ResponseWriter: w, status: http.StatusOK}
+
+		next.ServeHTTP(sw, r)
+
+		duration := time.Since(start)
+		clientIP := r.RemoteAddr
+		if fwd := r.Header.Get("X-Forwarded-For"); fwd != "" {
+			clientIP = fwd
+		}
+		log.Printf("[API] %s %s %s %d %v", clientIP, r.Method, r.URL.Path, sw.status, duration)
+	})
+}
+
 func (s *Server) Start() error {
 	mux := http.NewServeMux()
 
@@ -58,14 +96,17 @@ func (s *Server) Start() error {
 	apiMux.HandleFunc("/api/login", s.handleLogin)
 	apiMux.HandleFunc("/api/auth/status", s.handleAuthStatus)
 
+	// Wrap apiMux with logging
+	loggedApiMux := loggingMiddleware(apiMux)
+
 	// WebSocket
 	apiMux.HandleFunc("/ws", s.handleWebSocket)
 
 	// Apply auth to API routes (except login and auth status)
-	mux.Handle("/api/login", apiMux)
-	mux.Handle("/api/auth/status", apiMux)
-	mux.Handle("/api/", s.auth.AuthMiddleware(apiMux))
-	mux.Handle("/ws", s.auth.AuthMiddleware(apiMux))
+	mux.Handle("/api/login", loggedApiMux)
+	mux.Handle("/api/auth/status", loggedApiMux)
+	mux.Handle("/api/", s.auth.AuthMiddleware(loggedApiMux))
+	mux.Handle("/ws", s.auth.AuthMiddleware(loggedApiMux))
 
 	// Static files
 	staticContent, err := fs.Sub(staticFS, "static")
@@ -130,11 +171,15 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
+	startLoad := time.Now()
 	result, err := s.store.QueryRangeWithMeta(from, to)
 	if err != nil {
 		http.Error(w, fmt.Sprintf(`{"error":"%s"}`, err), http.StatusInternalServerError)
 		return
 	}
+	loadDuration := time.Since(startLoad)
+
+	log.Printf("[API History] loaded %d samples from tier %d (resolution: %s) for window %s in %v", len(result.Samples), result.Tier, result.Resolution, to.Sub(from).Round(time.Second), loadDuration)
 
 	w.Header().Set("Content-Type", "application/json")
 	if err := json.NewEncoder(w).Encode(result); err != nil {

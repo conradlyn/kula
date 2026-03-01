@@ -757,6 +757,17 @@ body {
     color: var(--accent-red);
 }
 
+.loading-spinner {
+    display: inline-block;
+    margin-left: 0.5rem;
+    animation: spin 1s linear infinite;
+    font-size: 0.9rem;
+}
+
+@keyframes spin {
+    100% { transform: rotate(360deg); }
+}
+
 /* ---- Responsive ---- */
 @media (max-width: 1400px) {
     .charts-grid {
