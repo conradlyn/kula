@@ -501,6 +501,13 @@
 
     function syncZoom(sourceChart) {
         const { min, max } = sourceChart.scales.x;
+
+        // Update the display to show the zoomed timeframe explicitly
+        if (min && max) {
+            const fmt = d => d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
+            document.getElementById('time-range-display').textContent = `${fmt(new Date(min))} → ${fmt(new Date(max))} (Zoomed)`;
+        }
+
         Object.values(state.charts).forEach(chart => {
             if (!chart || chart === sourceChart || !chart.options?.scales?.x) return;
             chart.options.scales.x.min = min;
@@ -516,6 +523,20 @@
             delete chart.options.scales.x.max;
             chart.update('none');
         });
+
+        // Restore time range display text
+        if (state.timeRange !== null) {
+            const labels = {
+                60: 'Last 1 minute', 300: 'Last 5 minutes', 900: 'Last 15 minutes', 1800: 'Last 30 minutes',
+                3600: 'Last 1 hour', 10800: 'Last 3 hours', 21600: 'Last 6 hours', 43200: 'Last 12 hours',
+                86400: 'Last 24 hours', 259200: 'Last 3 days', 604800: 'Last 7 days', 2592000: 'Last 30 days'
+            };
+            document.getElementById('time-range-display').textContent = labels[state.timeRange] || `Last ${state.timeRange}s`;
+        } else if (state.customFrom && state.customTo) {
+            const fmt = d => d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
+            document.getElementById('time-range-display').textContent = `${fmt(state.customFrom)} → ${fmt(state.customTo)}`;
+        }
+
         // Resume from zoom-pause
         if (state.pausedZoom) {
             state.pausedZoom = false;
