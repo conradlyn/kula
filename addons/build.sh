@@ -8,8 +8,6 @@ ALL_ARCHS=(
     "linux/amd64" 
     "linux/arm64" 
     "linux/riscv64" 
-    "darwin/amd64" 
-    "darwin/arm64" 
 )
 
 cd "$(dirname "$0")/.."
@@ -37,12 +35,13 @@ if [ "$ARG" == "cross" ] || [ "$ARG" == "all" ]; then
         # split string by / into os and arch
         os=$(echo "$arch" | cut -d'/' -f1)
         arch=$(echo "$arch" | cut -d'/' -f2)
+        version=$(cat VERSION)
         echo "Building for $os/$arch..."
         CGO_ENABLED=0 GOOS="$os" GOARCH="$arch" go build \
             -trimpath \
             -ldflags="-s -w" \
             -buildvcs=false \
-            -o "dist/kula-$os-$arch" \
+            -o "dist/kula-$os-$version-$arch" \
             ./cmd/kula/
     done
 else
@@ -55,4 +54,4 @@ else
         ./cmd/kula/
 fi
 
-echo "Done!"
+echo "Build done!"

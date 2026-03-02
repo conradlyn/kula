@@ -7,7 +7,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
-## [Unreleased]
+## [0.5.0] - 2026-03-02
 
 ### Added
 
@@ -19,6 +19,7 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
 - Logo / typography
 - Chart.js updated to 4.5.1
+- Updated helper scripts
 
 ## [0.4.2] - 2026-03-02
 
