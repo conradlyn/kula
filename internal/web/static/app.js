@@ -26,6 +26,7 @@
         loadingHistory: false,
         alerts: [],
         alertDropdownOpen: false,
+        timeDropdownOpen: false,
         layoutMode: localStorage.getItem('kula_layout') || 'grid',
         lastSample: null,
         joinMetrics: false, // fetched from server config
@@ -800,7 +801,7 @@
         if (s.sys?.entropy) sysInfo.push('entropy: ' + escapeHTML(s.sys.entropy));
         if (s.sys?.user_count !== undefined) sysInfo.push('users: ' + escapeHTML(s.sys.user_count));
         if (s.self) sysInfo.push('self: ' + s.self.cpu_pct.toFixed(1) + '% cpu, ' + formatBytesShort(s.self.mem_rss) + ' rss');
-        el('sys-info').innerHTML = sysInfo.join('  │  ');
+        el('sys-info').innerHTML = sysInfo.map(text => `<span class="sys-info-item">${text}</span>`).join('<span class="sys-sep mobile-hidden">│</span>');
     }
 
     function updateSubtitles(s) {
@@ -1475,13 +1476,25 @@
         document.getElementById('btn-pause').addEventListener('click', togglePause);
         document.getElementById('btn-layout').addEventListener('click', toggleLayout);
         document.getElementById('btn-alerts').addEventListener('click', toggleAlertDropdown);
+        document.getElementById('btn-time-menu').addEventListener('click', (e) => {
+            e.stopPropagation();
+            const list = document.getElementById('time-presets-list');
+            list.classList.toggle('open');
+            state.timeDropdownOpen = list.classList.contains('open');
+        });
         document.getElementById('btn-focus').addEventListener('click', toggleFocusMode);
         document.getElementById('login-form').addEventListener('submit', handleLogin);
         document.getElementById('btn-custom-range').addEventListener('click', toggleCustomTimePicker);
         document.getElementById('btn-apply-custom').addEventListener('click', applyCustomRange);
 
         document.querySelectorAll('.time-btn[data-range]').forEach(btn => {
-            btn.addEventListener('click', () => setTimeRange(parseInt(btn.dataset.range)));
+            btn.addEventListener('click', () => {
+                setTimeRange(parseInt(btn.dataset.range));
+                if (state.timeDropdownOpen) {
+                    state.timeDropdownOpen = false;
+                    document.getElementById('time-presets-list').classList.remove('open');
+                }
+            });
         });
 
         // Double-click on any chart to reset zoom
@@ -1492,11 +1505,15 @@
         // Hover-pause on chart cards
         setupHoverPause();
 
-        // Close alert dropdown when clicking outside
+        // Close dropdowns when clicking outside
         document.addEventListener('click', (e) => {
             if (state.alertDropdownOpen && !e.target.closest('.alert-container')) {
                 state.alertDropdownOpen = false;
                 document.getElementById('alert-dropdown').classList.add('hidden');
+            }
+            if (state.timeDropdownOpen && !e.target.closest('.time-presets')) {
+                state.timeDropdownOpen = false;
+                document.getElementById('time-presets-list').classList.remove('open');
             }
         });
 
