@@ -111,7 +111,7 @@ cd kula
 
 ```bash
 wget https://github.com/c0m4r/kula/releases/download/0.5.0/kula_0.5.0_amd64.deb
-echo "e9d124f4f6711a7ae7855e766e0fd1fa1b2f3f7bf4c155dcb9c98d6123aebdd0" | sha256sum -c || rm kula_0.5.0_amd64.deb
+echo "e9d124f4f6711a7ae7855e766e0fd1fa1b2f3f7bf4c155dcb9c98d6123aebdd0 kula_0.5.0_amd64.deb" | sha256sum -c || rm kula_0.5.0_amd64.deb
 sudo dpkg -i kula_0.5.0_amd64.deb
 systemctl status kula
 ```
