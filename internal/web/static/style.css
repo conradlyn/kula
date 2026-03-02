@@ -197,7 +197,10 @@ body {
     opacity: 0.8;
 }
 
-.hostname {
+.hostname,
+.sys-os,
+.sys-kernel,
+.sys-arch {
     padding: 0.2rem 0.6rem;
     background: rgba(59, 130, 246, 0.15);
     border: 1px solid rgba(59, 130, 246, 0.3);

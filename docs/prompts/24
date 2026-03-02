@@ -11,3 +11,7 @@ looks like version in usage message and web ui footer is displayed properly only
 I'm running the server
 
 all good, continue and make sure to also include OS, Kernel, Arch in web ui and tui
+
+---
+
+you forgot to add css for new ui elements so they match the design
