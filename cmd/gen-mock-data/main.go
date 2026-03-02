@@ -5,6 +5,7 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"math"
 	"math/rand"
 	"os"
 	"strings"
@@ -20,7 +21,6 @@ func main() {
 	cfgPath := flag.String("config", "config.yaml", "path to configuration file")
 	flag.Parse()
 
-	// Load config
 	cfg, err := config.Load(*cfgPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)
@@ -53,58 +53,157 @@ func main() {
 	totalSamples := *days * 24 * 60 * 60
 	fmt.Printf("Generating %d samples (%d days of 1s resolution)...\n", totalSamples, *days)
 
-	// We'll generate data ending at "now"
 	now := time.Now()
 	startTime := now.Add(-time.Duration(totalSamples) * time.Second)
 
-	// To make the data look somewhat realistic, we can use a basic random walk or sine wave
-	cpuUsage := 5.0
-	var memUsed uint64 = 500 * 1024 * 1024 // 500MB
-	memTotal := uint64(8 * 1024 * 1024 * 1024)
+	const (
+		memTotal  = uint64(8 * 1024 * 1024 * 1024) // 8 GB
+		swapTotal = uint64(2 * 1024 * 1024 * 1024) // 2 GB
+	)
+
+	// Stateful values that random-walk between samples
+	cpuBase := 15.0
+	memUsed := uint64(1.5 * 1024 * 1024 * 1024)
+	swapUsed := uint64(200 * 1024 * 1024)
+	rxMbps := 5.0
+	txMbps := 2.0
+	diskUtil := [2]float64{5.0, 2.0}
+	diskReadBps := [2]float64{1024 * 1024, 512 * 1024}
+	diskWriteBps := [2]float64{512 * 1024, 256 * 1024}
 
 	rng := rand.New(rand.NewSource(time.Now().UnixNano()))
-
 	startGenTime := time.Now()
 
 	for i := 0; i < totalSamples; i++ {
 		ts := startTime.Add(time.Duration(i) * time.Second)
 
-		// Jitter
-		cpuUsage += rng.Float64()*4 - 2 // [-2, 2]
-		if cpuUsage < 0 {
-			cpuUsage = 0
-		}
-		if cpuUsage > 100 {
-			cpuUsage = 100
+		// Diurnal baseline: business hours push a higher CPU load
+		hourFrac := float64(ts.Hour())/24.0 + float64(ts.Minute())/1440.0
+		diurnal := 10.0 + 30.0*math.Max(0, math.Sin((hourFrac-0.25)*math.Pi))
+
+		// Random walk with drift toward diurnal baseline
+		cpuBase += rng.Float64()*4 - 2
+		cpuBase = clamp(cpuBase, 0, 100)
+		cpuBase += (diurnal - cpuBase) * 0.002
+
+		// Occasional CPU spikes (~1% of seconds)
+		if rng.Float64() < 0.001 {
+			cpuBase = math.Min(cpuBase+rng.Float64()*40, 100)
 		}
 
-		memUsed = uint64(float64(memUsed) + (rng.Float64()*10-5)*1024*1024)
-		if memUsed < 100*1024*1024 {
-			memUsed = 100 * 1024 * 1024
+		memUsed = uint64(clamp(float64(memUsed)+(rng.Float64()*20-10)*1024*1024,
+			256*1024*1024, float64(memTotal-512*1024*1024)))
+		swapUsed = uint64(clamp(float64(swapUsed)+(rng.Float64()*4-2)*1024*1024,
+			0, float64(swapTotal)))
+
+		rxMbps = clamp(rxMbps+(rng.Float64()*2-1), 0.1, 1000)
+		txMbps = clamp(txMbps+(rng.Float64()*1-0.5), 0.1, 1000)
+		txMbps += (rxMbps*0.3 - txMbps) * 0.01 // tx loosely tracks rx
+
+		for d := 0; d < 2; d++ {
+			diskUtil[d] = clamp(diskUtil[d]+(rng.Float64()*6-3), 0, 100)
+			diskReadBps[d] = clamp(diskReadBps[d]+(rng.Float64()*200-100)*1024, 0, 500*1024*1024)
+			diskWriteBps[d] = clamp(diskWriteBps[d]+(rng.Float64()*100-50)*1024, 0, 500*1024*1024)
 		}
-		if memUsed > memTotal {
-			memUsed = memTotal
-		}
+
+		memFree := memTotal - memUsed
+		memCached := memTotal / 10
+		memBuffers := memTotal / 20
 
 		sample := &collector.Sample{
 			Timestamp: ts,
 			CPU: collector.CPUStats{
 				Total: collector.CPUCoreStats{
-					ID:    "all",
-					Usage: cpuUsage,
+					ID:     "all",
+					User:   cpuBase * 0.6,
+					System: cpuBase * 0.25,
+					IOWait: cpuBase * 0.1,
+					Idle:   math.Max(0, 100-cpuBase),
+					Usage:  cpuBase,
+				},
+				Cores: []collector.CPUCoreStats{
+					{ID: "cpu0", Usage: clamp(cpuBase+rng.Float64()*10-5, 0, 100)},
+					{ID: "cpu1", Usage: clamp(cpuBase+rng.Float64()*10-5, 0, 100)},
+					{ID: "cpu2", Usage: clamp(cpuBase+rng.Float64()*10-5, 0, 100)},
+					{ID: "cpu3", Usage: clamp(cpuBase+rng.Float64()*10-5, 0, 100)},
 				},
 			},
-			Memory: collector.MemoryStats{
-				Total: memTotal,
-				Used:  memUsed,
-				Free:  memTotal - memUsed,
-			},
 			LoadAvg: collector.LoadAvg{
-				Load1:   cpuUsage / 20.0,
-				Load5:   cpuUsage / 25.0,
-				Load15:  cpuUsage / 30.0,
-				Running: 1,
-				Total:   100,
+				Load1:   cpuBase / 20.0,
+				Load5:   cpuBase / 25.0,
+				Load15:  cpuBase / 30.0,
+				Running: 1 + int(cpuBase/25),
+				Total:   120,
+			},
+			Memory: collector.MemoryStats{
+				Total:       memTotal,
+				Used:        memUsed,
+				Free:        memFree,
+				Available:   memFree + memCached,
+				Cached:      memCached,
+				Buffers:     memBuffers,
+				UsedPercent: float64(memUsed) / float64(memTotal) * 100,
+			},
+			Swap: collector.SwapStats{
+				Total:       swapTotal,
+				Used:        swapUsed,
+				Free:        swapTotal - swapUsed,
+				UsedPercent: float64(swapUsed) / float64(swapTotal) * 100,
+			},
+			Network: collector.NetworkStats{
+				Interfaces: []collector.NetInterface{
+					{
+						Name:   "eth0",
+						RxMbps: rxMbps,
+						TxMbps: txMbps,
+						RxPPS:  rxMbps * 100,
+						TxPPS:  txMbps * 100,
+					},
+				},
+				Sockets: collector.SocketStats{
+					TCPInUse: 20 + int(cpuBase/5),
+					UDPInUse: 5,
+					TCPTw:    int(cpuBase / 10),
+				},
+			},
+			Disks: collector.DiskStats{
+				Devices: []collector.DiskDevice{
+					{
+						Name:         "sda",
+						Utilization:  diskUtil[0],
+						ReadBytesPS:  diskReadBps[0],
+						WriteBytesPS: diskWriteBps[0],
+					},
+					{
+						Name:         "sdb",
+						Utilization:  diskUtil[1],
+						ReadBytesPS:  diskReadBps[1],
+						WriteBytesPS: diskWriteBps[1],
+					},
+				},
+				FileSystems: []collector.FileSystemInfo{
+					{
+						Device:     "/dev/sda1",
+						MountPoint: "/",
+						FSType:     "ext4",
+						Total:      100 * 1024 * 1024 * 1024,
+						Used:       40*1024*1024*1024 + uint64(i)*1024, // slowly growing
+						Available:  60 * 1024 * 1024 * 1024,
+						UsedPct:    40.0,
+					},
+				},
+			},
+			System: collector.SystemStats{
+				Hostname:  "mock-server",
+				Uptime:    float64(i),
+				ClockSync: true,
+				Entropy:   3000,
+			},
+			Process: collector.ProcessStats{
+				Total:    120 + int(cpuBase/10),
+				Running:  1 + int(cpuBase/25),
+				Sleeping: 100,
+				Threads:  400 + int(cpuBase*2),
 			},
 		}
 
@@ -118,6 +217,17 @@ func main() {
 	}
 
 	elapsed := time.Since(startGenTime)
-	fmt.Printf("Finished generating %d samples in %v (%.0f samples/sec).\n", totalSamples, elapsed, float64(totalSamples)/elapsed.Seconds())
+	fmt.Printf("Finished generating %d samples in %v (%.0f samples/sec).\n",
+		totalSamples, elapsed, float64(totalSamples)/elapsed.Seconds())
 	fmt.Println("You can now start kula to test the performance boundaries!")
+}
+
+func clamp(v, min, max float64) float64 {
+	if v < min {
+		return min
+	}
+	if v > max {
+		return max
+	}
+	return v
 }
