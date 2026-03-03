@@ -212,11 +212,12 @@
             { label: '15 min', borderColor: colors.green, data: [], fill: false },
         ]);
 
-        // Memory — with Free and Available datasets, max set dynamically
+        // Memory — with Free, Available, and Shmem datasets, max set dynamically
         state.charts.memory = createTimeSeriesChart('chart-memory', [
             { label: 'Used', borderColor: colors.blue, backgroundColor: colors.blueAlpha, fill: true, data: [] },
             { label: 'Buffers', borderColor: colors.cyan, backgroundColor: colors.cyanAlpha, fill: true, data: [] },
             { label: 'Cached', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
+            { label: 'Shmem', borderColor: colors.purple, backgroundColor: colors.purpleAlpha, fill: true, data: [] },
             { label: 'Free', borderColor: colors.teal, data: [], fill: false, borderDash: [4, 2] },
             { label: 'Available', borderColor: colors.lime, data: [], fill: false, borderDash: [4, 2] },
         ], { ticks: { callback: v => formatBytesShort(v) } });
@@ -247,15 +248,36 @@
             { label: 'UDP', borderColor: colors.green, data: [], fill: false },
             { label: 'TIME_WAIT', borderColor: colors.yellow, data: [], fill: false },
             { label: 'Established', borderColor: colors.cyan, data: [], fill: false },
+            { label: 'InErrs', borderColor: colors.red, data: [], fill: false, borderDash: [4, 2] },
+            { label: 'OutRsts', borderColor: colors.orange, data: [], fill: false, borderDash: [4, 2] },
         ]);
 
-        // Disk I/O
+        // Disk I/O — bandwidth + IOPS
         state.charts.diskio = createTimeSeriesChart('chart-disk-io', [
-            { label: 'Read', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
-            { label: 'Write', borderColor: colors.orange, backgroundColor: colors.orangeAlpha, fill: true, data: [] },
+            { label: 'Read B/s', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [], yAxisID: 'y' },
+            { label: 'Write B/s', borderColor: colors.orange, backgroundColor: colors.orangeAlpha, fill: true, data: [], yAxisID: 'y' },
+            { label: 'Reads/s', borderColor: colors.cyan, data: [], fill: false, borderDash: [4, 2], yAxisID: 'y1' },
+            { label: 'Writes/s', borderColor: colors.pink, data: [], fill: false, borderDash: [4, 2], yAxisID: 'y1' },
         ], { ticks: { callback: v => formatBytesShort(v) + '/s' } }, {
-            tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s' } }
+            tooltip: {
+                callbacks: {
+                    label: ctx => ctx.dataset.yAxisID === 'y1'
+                        ? ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(0) + ' IOPS'
+                        : ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s'
+                }
+            }
         });
+
+        // Reconfigure disk IO chart for dual axes
+        if (state.charts.diskio) {
+            state.charts.diskio.options.scales.y1 = {
+                position: 'right',
+                beginAtZero: true,
+                grid: { display: false },
+                ticks: { callback: v => v.toFixed(0) + ' IO/s' },
+            };
+            state.charts.diskio.update('none');
+        }
 
 
 
@@ -356,13 +378,14 @@
             state.charts.loadavg.data.datasets[2].data.push(point(s.lavg.load15));
         }
 
-        // Memory — with Free and Available
+        // Memory — with Free, Available, and Shmem
         if (state.charts.memory && s.mem) {
             state.charts.memory.data.datasets[0].data.push(point(s.mem.used));
             state.charts.memory.data.datasets[1].data.push(point(s.mem.buffers));
             state.charts.memory.data.datasets[2].data.push(point(s.mem.cached));
-            state.charts.memory.data.datasets[3].data.push(point(s.mem.free));
-            state.charts.memory.data.datasets[4].data.push(point(s.mem.available));
+            state.charts.memory.data.datasets[3].data.push(point(s.mem.shmem || 0));
+            state.charts.memory.data.datasets[4].data.push(point(s.mem.free));
+            state.charts.memory.data.datasets[5].data.push(point(s.mem.available));
             // Set max to total RAM
             if (s.mem.total > 0) {
                 state.charts.memory.options.scales.y.max = s.mem.total;
@@ -405,14 +428,23 @@
             state.charts.connections.data.datasets[1].data.push(point(s.net.sockets.udp_inuse));
             state.charts.connections.data.datasets[2].data.push(point(s.net.sockets.tcp_tw));
             state.charts.connections.data.datasets[3].data.push(point(s.net?.tcp?.curr_estab || 0));
+            state.charts.connections.data.datasets[4].data.push(point(s.net?.tcp?.in_errs_ps || 0));
+            state.charts.connections.data.datasets[5].data.push(point(s.net?.tcp?.out_rsts_ps || 0));
         }
 
-        // Disk I/O (sum all devices)
+        // Disk I/O (sum all devices) — bandwidth + IOPS
         if (state.charts.diskio && s.disk?.devices) {
-            let rBps = 0, wBps = 0;
-            s.disk.devices.forEach(d => { rBps += d.read_bps || 0; wBps += d.write_bps || 0; });
+            let rBps = 0, wBps = 0, rIops = 0, wIops = 0;
+            s.disk.devices.forEach(d => {
+                rBps += d.read_bps || 0;
+                wBps += d.write_bps || 0;
+                rIops += d.reads_ps || 0;
+                wIops += d.writes_ps || 0;
+            });
             state.charts.diskio.data.datasets[0].data.push(point(rBps));
             state.charts.diskio.data.datasets[1].data.push(point(wBps));
+            state.charts.diskio.data.datasets[2].data.push(point(rIops));
+            state.charts.diskio.data.datasets[3].data.push(point(wIops));
         }
 
 
@@ -834,10 +866,20 @@
             el('net-subtitle', `↓${formatMbps(rx)} ↑${formatMbps(tx)}`);
             el('pps-subtitle', `↓${formatPPS(rxPps)} ↑${formatPPS(txPps)}`);
         }
+        if (s.net?.sockets) {
+            const errs = (s.net?.tcp?.in_errs_ps || 0).toFixed(2);
+            const rsts = (s.net?.tcp?.out_rsts_ps || 0).toFixed(2);
+            el('conn-subtitle', `estab:${s.net?.tcp?.curr_estab || 0} err:${errs}/s rst:${rsts}/s`);
+        }
         if (s.disk?.devices) {
-            let r = 0, w = 0;
-            s.disk.devices.forEach(d => { r += d.read_bps || 0; w += d.write_bps || 0; });
-            el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s`);
+            let r = 0, w = 0, rIops = 0, wIops = 0;
+            s.disk.devices.forEach(d => {
+                r += d.read_bps || 0;
+                w += d.write_bps || 0;
+                rIops += d.reads_ps || 0;
+                wIops += d.writes_ps || 0;
+            });
+            el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
         }
         if (s.disk?.filesystems) {
             let used = 0, total = 0;
@@ -851,7 +893,7 @@
             }
         }
         if (s.proc) el('proc-subtitle', `${s.proc.total} total, ${s.proc.running} running`);
-        if (s.self) el('self-subtitle', `${s.self.cpu_pct.toFixed(1)}% cpu, ${formatBytesShort(s.self.mem_rss)} rss`);
+        if (s.self) el('self-subtitle', `${s.self.cpu_pct.toFixed(1)}% cpu, ${formatBytesShort(s.self.mem_rss)} rss, ${s.self.fds || 0} fds`);
     }
 
     // ---- WebSocket ----

@@ -114,11 +114,9 @@ func main() {
 			Timestamp: ts,
 			CPU: collector.CPUStats{
 				Total: collector.CPUCoreStats{
-					ID:     "all",
 					User:   round2(cpuBase * 0.6),
 					System: round2(cpuBase * 0.25),
 					IOWait: round2(cpuBase * 0.1),
-					Idle:   round2(math.Max(0, 100-cpuBase)),
 					Usage:  round2(cpuBase),
 				},
 				NumCores: 4,
@@ -137,6 +135,7 @@ func main() {
 				Available:   memFree + memCached,
 				Cached:      memCached,
 				Buffers:     memBuffers,
+				Shmem:       memTotal / 50, // ~2% of RAM as shared mem
 				UsedPercent: float64(memUsed) / float64(memTotal) * 100,
 			},
 			Swap: collector.SwapStats{
@@ -148,12 +147,19 @@ func main() {
 			Network: collector.NetworkStats{
 				Interfaces: []collector.NetInterface{
 					{
-						Name:   "eth0",
-						RxMbps: round2(rxMbps),
-						TxMbps: round2(txMbps),
-						RxPPS:  round2(rxMbps * 100),
-						TxPPS:  round2(txMbps * 100),
+						Name:    "eth0",
+						RxBytes: uint64(rxMbps*1e6/8) * uint64(i),
+						TxBytes: uint64(txMbps*1e6/8) * uint64(i),
+						RxMbps:  round2(rxMbps),
+						TxMbps:  round2(txMbps),
+						RxPPS:   round2(rxMbps * 100),
+						TxPPS:   round2(txMbps * 100),
 					},
+				},
+				TCP: collector.TCPStats{
+					CurrEstab: uint64(20 + int(cpuBase/5)),
+					InErrs:    float64(int(cpuBase/50) % 3),
+					OutRsts:   float64(int(cpuBase/20) % 10),
 				},
 				Sockets: collector.SocketStats{
 					TCPInUse: 20 + int(cpuBase/5),
@@ -165,13 +171,15 @@ func main() {
 				Devices: []collector.DiskDevice{
 					{
 						Name:         "sda",
-						Utilization:  diskUtil[0],
+						ReadsPerSec:  round2(diskUtil[0] * 10),
+						WritesPerSec: round2(diskUtil[0] * 5),
 						ReadBytesPS:  diskReadBps[0],
 						WriteBytesPS: diskWriteBps[0],
 					},
 					{
 						Name:         "sdb",
-						Utilization:  diskUtil[1],
+						ReadsPerSec:  round2(diskUtil[1] * 10),
+						WritesPerSec: round2(diskUtil[1] * 5),
 						ReadBytesPS:  diskReadBps[1],
 						WriteBytesPS: diskWriteBps[1],
 					},
@@ -199,6 +207,11 @@ func main() {
 				Running:  1 + int(cpuBase/25),
 				Sleeping: 100,
 				Threads:  400 + int(cpuBase*2),
+			},
+			Self: collector.SelfStats{
+				CPUPercent: round2(cpuBase * 0.01),
+				MemRSS:     16 * 1024 * 1024,
+				FDs:        20,
 			},
 		}
 

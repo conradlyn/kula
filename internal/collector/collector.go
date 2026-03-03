@@ -13,6 +13,7 @@ type Collector struct {
 	prevNet  map[string]netRaw
 	prevDisk map[string]diskRaw
 	prevSelf selfRaw
+	prevTCP  tcpRaw
 	prevTime time.Time
 }
 

@@ -7,20 +7,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
-## [Unrelease]
+## [Unreleased]
 
 ### Added
 
 - Built-in `kula inspect` CLI command to read and display tier files metadata
 - Standalone python script `addons/inspect_tier.py` for parsing binary storage and extracting latest JSON samples
+- Storage benchmark suite
+- New unit tests
+- New metrics displayed — Shmem, IOPS, TCP error rates, File Descriptors
 
 ### Changed
 
 - Storage size optimization: Round CPU and network values to 2 decimal places before saving
 - Storage size optimization: Ignore `loop` and `tmpfs` devices
 - Updated mock data generator
-- replace static disk usage chart with over time data
-- round _pct (percentage) values
+- Replace static disk usage chart with over time data
+- Round `_pct` (percentage) values
+- Improved performance
+- Metrics slimdown — removed unused/negligible fields to reduce JSON payload and storage footprint
 
 ### Fixed
 
@@ -28,8 +33,8 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
 ### Removed
 
-- non-linux filesystems
-- per-core monitoring (for now)
+- Non-linux filesystems
+- Per-core CPU monitoring (for now)
 
 ## [0.6.0] - 2026-03-03
 

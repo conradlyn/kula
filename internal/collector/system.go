@@ -36,9 +36,8 @@ func collectSystem() SystemStats {
 	// Clock sync - check via /sys/class/ptp or adjtimex status
 	s.ClockSync = checkClockSync()
 
-	// Users from /var/run/utmp
-	s.Users = parseUtmp()
-	s.UserCount = len(s.Users)
+	// User count only (no full user struct array)
+	s.UserCount = countLoggedInUsers()
 
 	return s
 }
@@ -62,23 +61,19 @@ func checkClockSync() bool {
 	return false
 }
 
-// parseUtmp reads /var/run/utmp to get logged-in users.
-// Simplified parsing — utmp has a fixed record format.
-func parseUtmp() []User {
+// countLoggedInUsers reads /var/run/utmp to count logged-in users.
+func countLoggedInUsers() int {
 	f, err := os.Open("/var/run/utmp")
 	if err != nil {
-		// Fallback: read from 'who' style info in /proc
-		return parseUsersFromProc()
+		return countUsersFromProc()
 	}
 	defer func() { _ = f.Close() }()
 
-	var users []User
+	count := 0
 	// utmp record size on x86_64 Linux is 384 bytes
 	const recordSize = 384
 	const utTypeOffset = 0
 	const utUserOffset = 8
-	const utLineOffset = 44
-	const utHostOffset = 76
 	const userProcess = 7
 
 	buf := make([]byte, recordSize)
@@ -95,28 +90,19 @@ func parseUtmp() []User {
 		}
 
 		name := strings.TrimRight(string(buf[utUserOffset:utUserOffset+32]), "\x00")
-		terminal := strings.TrimRight(string(buf[utLineOffset:utLineOffset+32]), "\x00")
-		host := strings.TrimRight(string(buf[utHostOffset:utHostOffset+256]), "\x00")
-
 		if name != "" {
-			users = append(users, User{
-				Name:     name,
-				Terminal: terminal,
-				Host:     host,
-			})
+			count++
 		}
 	}
-	return users
+	return count
 }
 
-func parseUsersFromProc() []User {
-	// Fallback: count loginuid files
-	var users []User
+func countUsersFromProc() int {
 	seen := make(map[string]bool)
 
 	entries, err := os.ReadDir("/proc")
 	if err != nil {
-		return nil
+		return 0
 	}
 
 	for _, entry := range entries {
@@ -147,6 +133,5 @@ func parseUsersFromProc() []User {
 		_ = f.Close()
 	}
 
-	// This fallback doesn't give us usernames without cgo, just return count
-	return users
+	return len(seen)
 }

@@ -50,12 +50,6 @@ func collectProcesses() ProcessStats {
 			ps.Blocked++
 		case "Z":
 			ps.Zombie++
-		case "T", "t":
-			ps.Stopped++
-		case "I":
-			ps.Idle++
-		default:
-			ps.Other++
 		}
 
 		// Count threads from /proc/[pid]/task

@@ -35,6 +35,11 @@ type Store struct {
 	tier1Buf   []*collector.Sample
 	tier2Count int
 	tier2Buf   []*AggregatedSample
+
+	// latestCache holds the most recently written sample in memory.
+	// This makes QueryLatest O(1) (a guarded pointer read) instead of
+	// O(n) (a full disk scan of the tier file).
+	latestCache *AggregatedSample
 }
 
 func NewStore(cfg config.StorageConfig) (*Store, error) {
@@ -65,7 +70,25 @@ func NewStore(cfg config.StorageConfig) (*Store, error) {
 		s.tiers = append(s.tiers, tier)
 	}
 
+	// Warm the latest-sample cache so QueryLatest is O(1) from the first call.
+	// This is the only full-tier scan at startup; every subsequent QueryLatest
+	// uses the in-memory pointer set by WriteSample.
+	s.warmLatestCache()
+
 	return s, nil
+}
+
+// warmLatestCache reads the most recent sample from tier 0 and stores it
+// in latestCache. Called once during NewStore to avoid the first QueryLatest
+// being a full disk scan after a process restart.
+func (s *Store) warmLatestCache() {
+	if len(s.tiers) == 0 {
+		return
+	}
+	samples, err := s.tiers[0].ReadLatest(1)
+	if err == nil && len(samples) > 0 {
+		s.latestCache = samples[0]
+	}
 }
 
 // WriteSample writes a raw sample to tier 1 and triggers aggregation.
@@ -84,6 +107,8 @@ func (s *Store) WriteSample(sample *collector.Sample) error {
 		if err := s.tiers[0].Write(as); err != nil {
 			return fmt.Errorf("writing tier 0: %w", err)
 		}
+		// Update the in-memory cache so QueryLatest never needs a disk scan.
+		s.latestCache = as
 	}
 
 	// Aggregate for tier 2 (every 60 samples = 1 minute)
@@ -244,6 +269,8 @@ func (s *Store) QueryRangeWithMeta(from, to time.Time) (*HistoryResult, error) {
 }
 
 // QueryLatest returns the latest sample from tier 1.
+// After the first WriteSample call the result comes from the in-memory
+// latestCache and requires no disk I/O at all.
 func (s *Store) QueryLatest() (*AggregatedSample, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -252,14 +279,14 @@ func (s *Store) QueryLatest() (*AggregatedSample, error) {
 		return nil, fmt.Errorf("no tiers configured")
 	}
 
-	samples, err := s.tiers[0].ReadLatest(1)
-	if err != nil {
-		return nil, err
+	// Fast path: in-memory cache is always kept current by WriteSample.
+	if s.latestCache != nil {
+		return s.latestCache, nil
 	}
-	if len(samples) == 0 {
-		return nil, nil
-	}
-	return samples[0], nil
+
+	// Cold path: only reached on an empty store where no sample has been
+	// written yet this process lifetime and warmLatestCache found nothing.
+	return nil, nil
 }
 
 func (s *Store) Close() error {

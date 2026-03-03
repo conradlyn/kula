@@ -88,37 +88,25 @@ func (c *Collector) collectNetwork(elapsed float64) NetworkStats {
 	}
 
 	c.prevNet = current
-
-	// Parse socket stats
 	stats.Sockets = parseSocketStats()
-	stats.TCP = parseSNMP("Tcp")
-	stats.UDP = parseSNMP("Udp")
-	stats.TCP6 = parseSNMP6("Tcp6")
-	stats.UDP6 = parseSNMP6("Udp6")
+	stats.TCP = c.collectTCPStats(elapsed)
 
 	return stats
 }
 
+// parseSocketStats reads /proc/net/sockstat and extracts the three
+// counters we actually display: tcp_inuse, tcp_tw, udp_inuse.
 func parseSocketStats() SocketStats {
 	ss := SocketStats{}
-	// IPv4
-	parseSockstatFile("/proc/net/sockstat", &ss)
-	// IPv6
-	parseSockstatFile6("/proc/net/sockstat6", &ss)
-	return ss
-}
-
-func parseSockstatFile(path string, ss *SocketStats) {
-	f, err := os.Open(path)
+	f, err := os.Open("/proc/net/sockstat")
 	if err != nil {
-		return
+		return ss
 	}
 	defer func() { _ = f.Close() }()
 
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
+		fields := strings.Fields(scanner.Text())
 		if len(fields) < 3 {
 			continue
 		}
@@ -129,119 +117,69 @@ func parseSockstatFile(path string, ss *SocketStats) {
 				switch fields[i] {
 				case "inuse":
 					ss.TCPInUse = val
-				case "orphan":
-					ss.TCPOrphan = val
 				case "tw":
 					ss.TCPTw = val
-				case "alloc":
-					ss.TCPAlloc = val
-				case "mem":
-					ss.TCPMem = val
 				}
 			}
 		case "UDP:":
 			for i := 1; i+1 < len(fields); i += 2 {
 				val, _ := strconv.Atoi(fields[i+1])
-				switch fields[i] {
-				case "inuse":
+				if fields[i] == "inuse" {
 					ss.UDPInUse = val
-				case "mem":
-					ss.UDPMem = val
-				}
-			}
-		case "RAW:":
-			for i := 1; i+1 < len(fields); i += 2 {
-				val, _ := strconv.Atoi(fields[i+1])
-				if fields[i] == "inuse" {
-					ss.RawInUse = val
-				}
-			}
-		case "FRAG:":
-			for i := 1; i+1 < len(fields); i += 2 {
-				val, _ := strconv.Atoi(fields[i+1])
-				if fields[i] == "inuse" {
-					ss.FragInUse = val
 				}
 			}
 		}
 	}
+	return ss
 }
 
-func parseSockstatFile6(path string, ss *SocketStats) {
-	f, err := os.Open(path)
-	if err != nil {
-		return
-	}
-	defer func() { _ = f.Close() }()
-
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) < 3 {
-			continue
-		}
-		switch fields[0] {
-		case "TCP6:":
-			for i := 1; i+1 < len(fields); i += 2 {
-				val, _ := strconv.Atoi(fields[i+1])
-				if fields[i] == "inuse" {
-					ss.TCP6InUse = val
-				}
-			}
-		case "UDP6:":
-			for i := 1; i+1 < len(fields); i += 2 {
-				val, _ := strconv.Atoi(fields[i+1])
-				if fields[i] == "inuse" {
-					ss.UDP6InUse = val
-				}
-			}
-		case "RAW6:":
-			for i := 1; i+1 < len(fields); i += 2 {
-				val, _ := strconv.Atoi(fields[i+1])
-				if fields[i] == "inuse" {
-					ss.Raw6InUse = val
-				}
-			}
-		case "FRAG6:":
-			for i := 1; i+1 < len(fields); i += 2 {
-				val, _ := strconv.Atoi(fields[i+1])
-				if fields[i] == "inuse" {
-					ss.Frag6InUse = val
-				}
-			}
-		}
-	}
+// tcpRaw holds the raw cumulative TCP counters from /proc/net/snmp.
+type tcpRaw struct {
+	currEstab uint64
+	inErrs    uint64
+	outRsts   uint64
 }
 
-func parseSNMP(proto string) NetProtoStats {
+// collectTCPStats reads /proc/net/snmp and returns per-second rates for
+// InErrs and OutRsts, and the current gauge value for CurrEstab.
+func (c *Collector) collectTCPStats(elapsed float64) TCPStats {
+	cur := readTCPRaw()
+	ts := TCPStats{
+		CurrEstab: cur.currEstab,
+	}
+	if c.prevTCP.inErrs > 0 && elapsed > 0 {
+		ts.InErrs = round2(float64(cur.inErrs-c.prevTCP.inErrs) / elapsed)
+		ts.OutRsts = round2(float64(cur.outRsts-c.prevTCP.outRsts) / elapsed)
+	}
+	c.prevTCP = cur
+	return ts
+}
+
+// readTCPRaw reads the raw cumulative TCP counters from /proc/net/snmp.
+func readTCPRaw() tcpRaw {
 	f, err := os.Open("/proc/net/snmp")
 	if err != nil {
-		return NetProtoStats{}
+		return tcpRaw{}
 	}
 	defer func() { _ = f.Close() }()
 
-	ns := NetProtoStats{}
+	var raw tcpRaw
 	scanner := bufio.NewScanner(f)
 	var headerFields []string
 	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
+		fields := strings.Fields(scanner.Text())
 		if len(fields) < 2 {
 			continue
 		}
 		prefix := strings.TrimSuffix(fields[0], ":")
-		if prefix != proto {
-			if prefix == proto {
-				headerFields = fields[1:]
-			}
+		if prefix != "Tcp" {
 			continue
 		}
 		if headerFields == nil {
 			headerFields = fields[1:]
 			continue
 		}
-		// This is the values line
+		// Values line
 		values := fields[1:]
 		for i, hdr := range headerFields {
 			if i >= len(values) {
@@ -249,63 +187,15 @@ func parseSNMP(proto string) NetProtoStats {
 			}
 			val, _ := strconv.ParseUint(values[i], 10, 64)
 			switch hdr {
-			case "ActiveOpens":
-				ns.ActiveOpens = val
-			case "PassiveOpens":
-				ns.PassiveOpens = val
 			case "CurrEstab":
-				ns.CurrEstab = val
-			case "InSegs":
-				ns.InSegs = val
-			case "OutSegs":
-				ns.OutSegs = val
+				raw.currEstab = val
 			case "InErrs":
-				ns.InErrs = val
+				raw.inErrs = val
 			case "OutRsts":
-				ns.OutRsts = val
-			case "InDatagrams":
-				ns.InDatagrams = val
-			case "OutDatagrams":
-				ns.OutDatagrams = val
+				raw.outRsts = val
 			}
 		}
-		headerFields = nil
+		break
 	}
-	return ns
-}
-
-func parseSNMP6(proto string) NetProtoStats {
-	f, err := os.Open("/proc/net/snmp6")
-	if err != nil {
-		return NetProtoStats{}
-	}
-	defer func() { _ = f.Close() }()
-
-	ns := NetProtoStats{}
-	scanner := bufio.NewScanner(f)
-	for scanner.Scan() {
-		line := scanner.Text()
-		fields := strings.Fields(line)
-		if len(fields) != 2 {
-			continue
-		}
-		val, _ := strconv.ParseUint(fields[1], 10, 64)
-		switch fields[0] {
-		case proto + "InSegs":
-			ns.InSegs = val
-		case proto + "OutSegs":
-			ns.OutSegs = val
-		case proto + "ActiveOpens":
-			ns.ActiveOpens = val
-		case proto + "PassiveOpens":
-			ns.PassiveOpens = val
-		case proto + "CurrEstab":
-			ns.CurrEstab = val
-		case proto + "InDatagrams":
-			ns.InDatagrams = val
-		case proto + "OutDatagrams":
-			ns.OutDatagrams = val
-		}
-	}
-	return ns
+	return raw
 }

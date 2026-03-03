@@ -9,12 +9,10 @@ import (
 )
 
 type diskRaw struct {
-	reads      uint64
-	writes     uint64
-	readSect   uint64
-	writeSect  uint64
-	ioTime     uint64
-	weightedIO uint64
+	reads     uint64
+	writes    uint64
+	readSect  uint64
+	writeSect uint64
 }
 
 func parseDiskStats() map[string]diskRaw {
@@ -49,10 +47,6 @@ func parseDiskStats() map[string]diskRaw {
 		d.readSect = parseUint(fields[5], 10, 64, "disk.readSect")
 		d.writes = parseUint(fields[7], 10, 64, "disk.writes")
 		d.writeSect = parseUint(fields[9], 10, 64, "disk.writeSect")
-		d.ioTime = parseUint(fields[12], 10, 64, "disk.ioTime")
-		if len(fields) > 13 {
-			d.weightedIO = parseUint(fields[13], 10, 64, "disk.weightedIO")
-		}
 		result[name] = d
 	}
 	return result
@@ -103,23 +97,14 @@ func (c *Collector) collectDisks(elapsed float64) DiskStats {
 
 	for name, cur := range current {
 		dev := DiskDevice{
-			Name:         name,
-			IOInProgress: 0,
-			IOTime:       cur.ioTime,
-			WeightedIO:   cur.weightedIO,
+			Name: name,
 		}
 
 		if prev, ok := c.prevDisk[name]; ok && elapsed > 0 {
-			dev.ReadsPerSec = float64(cur.reads-prev.reads) / elapsed
-			dev.WritesPerSec = float64(cur.writes-prev.writes) / elapsed
+			dev.ReadsPerSec = round2(float64(cur.reads-prev.reads) / elapsed)
+			dev.WritesPerSec = round2(float64(cur.writes-prev.writes) / elapsed)
 			dev.ReadBytesPS = float64(cur.readSect-prev.readSect) * 512.0 / elapsed
 			dev.WriteBytesPS = float64(cur.writeSect-prev.writeSect) * 512.0 / elapsed
-
-			ioTimeDelta := float64(cur.ioTime - prev.ioTime)
-			dev.Utilization = round2(ioTimeDelta / (elapsed * 1000.0) * 100.0)
-			if dev.Utilization > 100 {
-				dev.Utilization = 100
-			}
 		}
 
 		stats.Devices = append(stats.Devices, dev)
@@ -179,16 +164,13 @@ func collectFileSystems() []FileSystemInfo {
 		}
 
 		result = append(result, FileSystemInfo{
-			Device:      device,
-			MountPoint:  mount,
-			FSType:      fstype,
-			Total:       total,
-			Used:        used,
-			Available:   free,
-			UsedPct:     usedPct,
-			InodesTotal: stat.Files,
-			InodesUsed:  stat.Files - stat.Ffree,
-			InodesFree:  stat.Ffree,
+			Device:     device,
+			MountPoint: mount,
+			FSType:     fstype,
+			Total:      total,
+			Used:       used,
+			Available:  free,
+			UsedPct:    usedPct,
 		})
 	}
 	return result

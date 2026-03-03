@@ -26,15 +26,15 @@ Kula collects system metrics every second by reading directly from `/proc` and `
 
 | Metric | What's Collected |
 |--------|-----------------|
-| **CPU** | Total usage (user, system, idle, iowait, irq, steal, guest) |
+| **CPU** | Total usage (user, system, iowait, irq, softirq, steal) + core count |
 | **Load** | 1 / 5 / 15 min averages, running & total tasks |
-| **Memory** | Total, free, available, used, buffers, cached, shmem, dirty, mapped |
-| **Swap** | Total, free, used, cached |
-| **Network** | Per-interface throughput (Mbps), packets/s, errors, drops; TCP/UDP/ICMP counters |
-| **Disks** | Per-device I/O (read/write bytes/s, utilization %); filesystem & inode usage |
-| **System** | Uptime, entropy, clock sync, hostname, logged-in users |
-| **Processes** | Task counts by state (running, sleeping, blocked, zombie), total threads |
-| **Self** | Kula's own CPU%, RSS/VMS memory, threads, file descriptors |
+| **Memory** | Total, free, available, used, buffers, cached, **shmem** |
+| **Swap** | Total, free, used |
+| **Network** | Per-interface throughput (Mbps), packets/s, errors, drops; **TCP errors/s, resets/s**, established connections; socket counts |
+| **Disks** | Per-device I/O (read/write bytes/s, **reads/s, writes/s IOPS**); filesystem usage |
+| **System** | Uptime, entropy, clock sync, hostname, logged-in user count |
+| **Processes** | Running, sleeping, blocked, zombie counts |
+| **Self** | Kula's own CPU%, RSS memory, **open file descriptors** |
 
 ---
 
@@ -215,6 +215,21 @@ CGO_ENABLED=0 go build -o kula ./cmd/kula/
 CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -buildvcs=false -o kula ./cmd/kula/
 ```
 
+### Testing & Benchmarks
+
+```bash
+# Run unit tests with race detector
+go test -race ./...
+
+# Run the full storage benchmark suite (default: 3s per bench)
+bash addons/benchmark.sh
+
+# Shorter run for quick iteration
+bash addons/benchmark.sh 500ms
+```
+
+Benchmarks cover the full storage engine: codec encode/decode, ring-buffer write throughput, concurrent writes, QueryRange at various sizes (small/large/wrapped), the `QueryLatest` cache vs cold-disk paths, multi-tier aggregation, and the inline downsampler.
+
 ### Cross-Compile
 
 ```bash
@@ -279,6 +294,7 @@ kula/
 │           └── style.css       #     Dark theme, glassmorphism
 ├── addons/
 │   ├── inspect_tier.py         # Standalone Python script for reading tiers
+│   ├── benchmark.sh            # Storage engine benchmark suite (formatted output)
 │   ├── build.sh                # Cross-compile (amd64/arm64/riscv64)
 │   ├── build_deb.sh            # Debian package builder
 │   ├── build_aur.sh            # Arch AUR PKGBUILD generator

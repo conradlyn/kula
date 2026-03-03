@@ -2,8 +2,6 @@ package collector
 
 import (
 	"os"
-	"runtime"
-	"strconv"
 	"strings"
 )
 
@@ -42,19 +40,13 @@ func (c *Collector) collectSelf(elapsed float64) SelfStats {
 		}
 	}
 
-	// Read /proc/self/status for memory
+	// Read /proc/self/status for RSS memory
 	statusData, err := os.ReadFile("/proc/self/status")
 	if err == nil {
 		for _, line := range strings.Split(string(statusData), "\n") {
 			if strings.HasPrefix(line, "VmRSS:") {
 				s.MemRSS = parseStatusKB(line, "self.rss") * 1024
-			} else if strings.HasPrefix(line, "VmSize:") {
-				s.MemVMS = parseStatusKB(line, "self.vms") * 1024
-			} else if strings.HasPrefix(line, "Threads:") {
-				parts := strings.Fields(line)
-				if len(parts) >= 2 {
-					s.NumThreads, _ = strconv.Atoi(parts[1])
-				}
+				break
 			}
 		}
 	}
@@ -63,8 +55,6 @@ func (c *Collector) collectSelf(elapsed float64) SelfStats {
 	if fds, err := os.ReadDir("/proc/self/fd"); err == nil {
 		s.FDs = len(fds)
 	}
-
-	_ = runtime.NumGoroutine() // Could add goroutine count
 
 	return s
 }

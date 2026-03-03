@@ -70,7 +70,6 @@ type Model struct {
 	width     int
 	height    int
 	interval  time.Duration
-	showCores bool // toggle per-core CPU with 'a'
 	os        string
 	kernel    string
 	arch      string
@@ -82,7 +81,6 @@ func NewModel(c *collector.Collector, interval time.Duration, osName, kernel, ar
 		interval:  interval,
 		width:     120,
 		height:    40,
-		showCores: false,
 		os:        osName,
 		kernel:    kernel,
 		arch:      arch,
@@ -108,8 +106,6 @@ func (m Model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		switch msg.String() {
 		case "q", "ctrl+c":
 			return m, tea.Quit
-		case "a":
-			m.showCores = !m.showCores
 		}
 	case tea.WindowSizeMsg:
 		m.width = msg.Width
@@ -178,7 +174,7 @@ func (m Model) View() string {
 			colorByPct(s.Memory.UsedPercent).Render(fmt.Sprintf("%.1f%%", s.Memory.UsedPercent)),
 			valueStyle.Render(fmtB(s.Memory.Used)),
 			dimStyle.Render(fmtB(s.Memory.Total)),
-			dimStyle.Render(fmt.Sprintf("buf:%s cch:%s", fmtB(s.Memory.Buffers), fmtB(s.Memory.Cached)))))
+			dimStyle.Render(fmt.Sprintf("buf:%s cch:%s shm:%s", fmtB(s.Memory.Buffers), fmtB(s.Memory.Cached), fmtB(s.Memory.Shmem)))))
 		if s.Swap.Total > 0 {
 			lines = append(lines, fmt.Sprintf("        %s  %s / %s",
 				sectionStyle.Render("SWAP"),
@@ -186,14 +182,15 @@ func (m Model) View() string {
 				dimStyle.Render(fmtB(s.Swap.Total))))
 		}
 	} else {
-		lines = append(lines, fmt.Sprintf(" %s %s %s  %s / %s   buf:%s cch:%s",
+		lines = append(lines, fmt.Sprintf(" %s %s %s  %s / %s   buf:%s cch:%s shm:%s",
 			sectionStyle.Render("MEM "),
 			renderBar(s.Memory.UsedPercent, 100, barW),
 			colorByPct(s.Memory.UsedPercent).Render(fmt.Sprintf("%5.1f%%", s.Memory.UsedPercent)),
 			valueStyle.Render(fmtB(s.Memory.Used)),
 			dimStyle.Render(fmtB(s.Memory.Total)),
 			dimStyle.Render(fmtB(s.Memory.Buffers)),
-			dimStyle.Render(fmtB(s.Memory.Cached))))
+			dimStyle.Render(fmtB(s.Memory.Cached)),
+			dimStyle.Render(fmtB(s.Memory.Shmem))))
 		if s.Swap.Total > 0 {
 			lines = append(lines, fmt.Sprintf(" %s %s %s  %s / %s",
 				sectionStyle.Render("SWAP"),
@@ -221,11 +218,14 @@ func (m Model) View() string {
 				iface.RxErrs, iface.TxErrs,
 				iface.RxDrop, iface.TxDrop))
 		}
-		lines = append(lines, fmt.Sprintf("   %s tcp:%d  udp:%d  tw:%d",
+		lines = append(lines, fmt.Sprintf("   %s tcp:%d  udp:%d  tw:%d  estab:%d  err:%.1f/s  rst:%.1f/s",
 			dimStyle.Render("sockets"),
 			s.Network.Sockets.TCPInUse,
 			s.Network.Sockets.UDPInUse,
-			s.Network.Sockets.TCPTw))
+			s.Network.Sockets.TCPTw,
+			s.Network.TCP.CurrEstab,
+			s.Network.TCP.InErrs,
+			s.Network.TCP.OutRsts))
 		lines = append(lines, "")
 	}
 
@@ -233,11 +233,11 @@ func (m Model) View() string {
 	if !compact {
 		lines = append(lines, " "+sectionStyle.Render("DISK"))
 		for _, dev := range s.Disks.Devices {
-			lines = append(lines, fmt.Sprintf("   %s  r: %s  w: %s  util: %s",
+			lines = append(lines, fmt.Sprintf("   %s  r: %s  w: %s  rIOPS:%.0f  wIOPS:%.0f",
 				labelStyle.Render(fmt.Sprintf("%-10s", dev.Name)),
 				valueAltStyle.Render(fmt.Sprintf("%8.1f KB/s", dev.ReadBytesPS/1024)),
 				valueStyle.Render(fmt.Sprintf("%8.1f KB/s", dev.WriteBytesPS/1024)),
-				colorByPct(dev.Utilization).Render(fmt.Sprintf("%5.1f%%", dev.Utilization))))
+				dev.ReadsPerSec, dev.WritesPerSec))
 		}
 		for _, fs := range s.Disks.FileSystems {
 			fsBarW := clamp(barW-10, 10, 30)
@@ -271,22 +271,19 @@ func (m Model) View() string {
 	if s.System.ClockSync {
 		syncIcon = valueStyle.Render("✓")
 	}
-	lines = append(lines, fmt.Sprintf(" %s entropy:%s  clock:%s(%s)  users:%s  self: cpu=%s mem=%s",
+	lines = append(lines, fmt.Sprintf(" %s entropy:%s  clock:%s(%s)  users:%s  self: cpu=%s mem=%s fds=%d",
 		sectionStyle.Render("SYS"),
 		valueAltStyle.Render(fmt.Sprintf("%d", s.System.Entropy)),
 		syncIcon,
 		dimStyle.Render(s.System.ClockSource),
 		valueAltStyle.Render(fmt.Sprintf("%d", s.System.UserCount)),
 		valueStyle.Render(fmt.Sprintf("%.1f%%", s.Self.CPUPercent)),
-		valueStyle.Render(fmtB(s.Self.MemRSS))))
+		valueStyle.Render(fmtB(s.Self.MemRSS)),
+		s.Self.FDs))
 
 	// ── Footer / help ────────────────────────────────────────
 	lines = append(lines, "")
-	coreHint := "'a' show cores"
-	if m.showCores {
-		coreHint = "'a' hide cores"
-	}
-	lines = append(lines, " "+helpStyle.Render(fmt.Sprintf("%s  │  'q' quit", coreHint)))
+	lines = append(lines, " "+helpStyle.Render("'q' quit"))
 
 	// ── Truncate to fit terminal height ──────────────────────
 	// Priority: show lines from the TOP down (CPU, load, memory first)

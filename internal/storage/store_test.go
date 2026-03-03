@@ -3,9 +3,13 @@ package storage
 import (
 	"kula-szpiegula/internal/collector"
 	"kula-szpiegula/internal/config"
+	"os"
+	"sync"
 	"testing"
 	"time"
 )
+
+// ---- Store helpers ----------------------------------------------------------
 
 func newTestStore(t *testing.T) *Store {
 	t.Helper()
@@ -14,6 +18,24 @@ func newTestStore(t *testing.T) *Store {
 		Directory: dir,
 		Tiers: []config.TierConfig{
 			{Resolution: time.Second, MaxSize: "10MB", MaxBytes: 10 * 1024 * 1024},
+		},
+	}
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore() error: %v", err)
+	}
+	return store
+}
+
+func newMultiTierStore(t *testing.T) *Store {
+	t.Helper()
+	dir := t.TempDir()
+	cfg := config.StorageConfig{
+		Directory: dir,
+		Tiers: []config.TierConfig{
+			{Resolution: time.Second, MaxSize: "10MB", MaxBytes: 10 * 1024 * 1024},
+			{Resolution: time.Minute, MaxSize: "10MB", MaxBytes: 10 * 1024 * 1024},
+			{Resolution: 5 * time.Minute, MaxSize: "10MB", MaxBytes: 10 * 1024 * 1024},
 		},
 	}
 	store, err := NewStore(cfg)
@@ -35,6 +57,14 @@ func makeSample(ts time.Time) *collector.Sample {
 	}
 }
 
+func makeSampleWithCPU(ts time.Time, usage float64) *collector.Sample {
+	s := makeSample(ts)
+	s.CPU.Total.Usage = usage
+	return s
+}
+
+// ---- Basic CRUD -------------------------------------------------------------
+
 func TestNewStore(t *testing.T) {
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()
@@ -44,14 +74,25 @@ func TestNewStore(t *testing.T) {
 	}
 }
 
+func TestNewStoreInvalidDirectory(t *testing.T) {
+	cfg := config.StorageConfig{
+		Directory: "/proc/nonexistent/kula_test_dir_that_cannot_be_created",
+		Tiers: []config.TierConfig{
+			{Resolution: time.Second, MaxSize: "1MB", MaxBytes: 1024 * 1024},
+		},
+	}
+	_, err := NewStore(cfg)
+	if err == nil {
+		t.Error("NewStore() with unwritable directory should return error")
+	}
+}
+
 func TestWriteAndQuerySample(t *testing.T) {
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()
 
 	now := time.Now()
-	sample := makeSample(now)
-
-	if err := store.WriteSample(sample); err != nil {
+	if err := store.WriteSample(makeSample(now)); err != nil {
 		t.Fatalf("WriteSample() error: %v", err)
 	}
 
@@ -90,6 +131,8 @@ func TestWriteMultipleSamples(t *testing.T) {
 	}
 }
 
+// ---- QueryLatest ------------------------------------------------------------
+
 func TestQueryLatest(t *testing.T) {
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()
@@ -111,9 +154,162 @@ func TestQueryLatest(t *testing.T) {
 	}
 }
 
+func TestQueryLatestEmptyStore(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	latest, err := store.QueryLatest()
+	if err != nil {
+		t.Fatalf("QueryLatest() on empty store error: %v", err)
+	}
+	// Should return nil, not an error
+	if latest != nil {
+		t.Errorf("QueryLatest() on empty store returned non-nil: %+v", latest)
+	}
+}
+
+func TestQueryLatestUsesCache(t *testing.T) {
+	// Verifies that after WriteSample the latestCache is set correctly
+	// and QueryLatest returns that sample without a disk scan.
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	now := time.Now().Truncate(time.Second)
+	sample := makeSampleWithCPU(now, 77.7)
+	if err := store.WriteSample(sample); err != nil {
+		t.Fatalf("WriteSample: %v", err)
+	}
+
+	last, err := store.QueryLatest()
+	if err != nil {
+		t.Fatalf("QueryLatest: %v", err)
+	}
+	if last == nil {
+		t.Fatal("QueryLatest returned nil after WriteSample")
+	}
+	if last.Data.CPU.Total.Usage != 77.7 {
+		t.Errorf("QueryLatest CPU = %f, want 77.7", last.Data.CPU.Total.Usage)
+	}
+
+	// Write a second sample and verify the cache advances
+	sample2 := makeSampleWithCPU(now.Add(time.Second), 88.8)
+	if err := store.WriteSample(sample2); err != nil {
+		t.Fatalf("WriteSample 2: %v", err)
+	}
+	last2, _ := store.QueryLatest()
+	if last2 == nil || last2.Data.CPU.Total.Usage != 88.8 {
+		t.Errorf("QueryLatest after second write: CPU = %v, want 88.8", last2)
+	}
+}
+
+func TestQueryLatestAfterRestartUsesWarmCache(t *testing.T) {
+	// Simulates a process restart: write samples, close the store,
+	// reopen it, and verify warmLatestCache restores the latest sample
+	// without an explicit WriteSample call.
+	dir := t.TempDir()
+	cfg := config.StorageConfig{
+		Directory: dir,
+		Tiers:     []config.TierConfig{{Resolution: time.Second, MaxSize: "10MB", MaxBytes: 10 * 1024 * 1024}},
+	}
+
+	base := time.Date(2026, 1, 1, 12, 0, 0, 0, time.UTC)
+
+	// First run — write and close
+	{
+		store1, err := NewStore(cfg)
+		if err != nil {
+			t.Fatalf("NewStore (first): %v", err)
+		}
+		for i := 0; i < 5; i++ {
+			_ = store1.WriteSample(makeSampleWithCPU(base.Add(time.Duration(i)*time.Second), float64(i*10)))
+		}
+		_ = store1.Close()
+	}
+
+	// Second run — reopen, no WriteSample; warmLatestCache should restore data
+	store2, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore (second): %v", err)
+	}
+	defer func() { _ = store2.Close() }()
+
+	latest, err := store2.QueryLatest()
+	if err != nil {
+		t.Fatalf("QueryLatest after restart: %v", err)
+	}
+	if latest == nil {
+		t.Fatal("QueryLatest after restart returned nil — warmLatestCache did not fire")
+	}
+	// The last written sample had CPU = 40.0 (i=4)
+	if latest.Data.CPU.Total.Usage != 40.0 {
+		t.Errorf("After restart QueryLatest CPU = %f, want 40.0", latest.Data.CPU.Total.Usage)
+	}
+}
+
+// ---- QueryRange edge cases --------------------------------------------------
+
+func TestQueryRangeEmpty(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	results, err := store.QueryRange(time.Now(), time.Now().Add(time.Minute))
+	if err != nil {
+		t.Fatalf("QueryRange() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Empty store should return 0 results, got %d", len(results))
+	}
+}
+
+func TestQueryRangeOutOfBounds(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	// Write a sample at now
+	now := time.Now()
+	if err := store.WriteSample(makeSample(now)); err != nil {
+		t.Fatalf("WriteSample() error: %v", err)
+	}
+
+	// Query in the distant future
+	results, err := store.QueryRange(now.Add(time.Hour), now.Add(2*time.Hour))
+	if err != nil {
+		t.Fatalf("QueryRange() error: %v", err)
+	}
+	if len(results) != 0 {
+		t.Errorf("Future query should return 0 results, got %d", len(results))
+	}
+}
+
+func TestQueryRangePreservesChronologicalOrder(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := 20
+	for i := 0; i < n; i++ {
+		ts := base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(makeSampleWithCPU(ts, float64(i))); err != nil {
+			t.Fatalf("WriteSample(%d): %v", i, err)
+		}
+	}
+
+	results, err := store.QueryRange(base, base.Add(time.Duration(n)*time.Second))
+	if err != nil {
+		t.Fatalf("QueryRange: %v", err)
+	}
+	for i := 1; i < len(results); i++ {
+		if results[i].Timestamp.Before(results[i-1].Timestamp) {
+			t.Errorf("Results not in chronological order at index %d: %v < %v",
+				i, results[i].Timestamp, results[i-1].Timestamp)
+		}
+	}
+}
+
+// ---- Ring buffer wrap -------------------------------------------------------
+
 func TestRingBufferWrapRead(t *testing.T) {
 	dir := t.TempDir()
-	// Use a small tier (128KB) so we wrap after ~200 samples
 	cfg := config.StorageConfig{
 		Directory: dir,
 		Tiers: []config.TierConfig{
@@ -127,7 +323,7 @@ func TestRingBufferWrapRead(t *testing.T) {
 	defer func() { _ = store.Close() }()
 
 	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
-	totalSamples := 500 // enough to wrap multiple times in 128KB
+	totalSamples := 500
 
 	for i := 0; i < totalSamples; i++ {
 		ts := base.Add(time.Duration(i) * time.Second)
@@ -136,7 +332,6 @@ func TestRingBufferWrapRead(t *testing.T) {
 		}
 	}
 
-	// Query the last 10 seconds
 	queryFrom := base.Add(time.Duration(totalSamples-10) * time.Second)
 	queryTo := base.Add(time.Duration(totalSamples) * time.Second)
 	results, err := store.QueryRange(queryFrom, queryTo)
@@ -144,30 +339,544 @@ func TestRingBufferWrapRead(t *testing.T) {
 		t.Fatalf("QueryRange() error: %v", err)
 	}
 	if len(results) == 0 {
-		t.Fatal("QueryRange() returned 0 results after ring buffer wrap — this is the bug!")
+		t.Fatal("QueryRange() returned 0 results after ring buffer wrap")
 	}
 	if len(results) < 8 {
 		t.Errorf("QueryRange() returned only %d results, expected ~10 recent samples", len(results))
 	}
 	t.Logf("QueryRange() returned %d results (expected ~10)", len(results))
 
-	// Verify the results are from the expected time range
 	for _, r := range results {
 		if r.Timestamp.Before(queryFrom) || r.Timestamp.After(queryTo) {
-			t.Errorf("Sample timestamp %v outside query range [%v, %v]", r.Timestamp, queryFrom, queryTo)
+			t.Errorf("Sample timestamp %v outside query range [%v, %v]",
+				r.Timestamp, queryFrom, queryTo)
 		}
 	}
 }
 
-func TestQueryRangeEmpty(t *testing.T) {
+func TestRingBufferOldestNewestTimestamp(t *testing.T) {
+	dir := t.TempDir()
+	cfg := config.StorageConfig{
+		Directory: dir,
+		Tiers: []config.TierConfig{
+			{Resolution: time.Second, MaxSize: "64KB", MaxBytes: 64 * 1024},
+		},
+	}
+	store, err := NewStore(cfg)
+	if err != nil {
+		t.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	n := 300 // should cause wrap in 64KB
+
+	first := base
+	var last time.Time
+	for i := 0; i < n; i++ {
+		last = base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(makeSample(last)); err != nil {
+			t.Fatalf("WriteSample(%d): %v", i, err)
+		}
+	}
+
+	tier := store.tiers[0]
+	newest := tier.NewestTimestamp()
+	oldest := tier.OldestTimestamp()
+
+	if newest.IsZero() {
+		t.Error("NewestTimestamp() is zero")
+	}
+	if oldest.IsZero() {
+		t.Error("OldestTimestamp() is zero")
+	}
+	if !newest.Equal(last) {
+		t.Errorf("NewestTimestamp = %v, want %v", newest, last)
+	}
+	// After wrap, oldest must be after the absolute first
+	if oldest.Before(first) {
+		t.Errorf("OldestTimestamp %v is before first written %v — stale oldest after wrap", oldest, first)
+	}
+	if !oldest.Before(last) {
+		t.Errorf("OldestTimestamp %v should be before last %v", oldest, last)
+	}
+	t.Logf("After %d samples in 64KB ring: oldest=%v newest=%v", n, oldest, newest)
+}
+
+// ---- InspectTierFile --------------------------------------------------------
+
+func TestInspectTierFile(t *testing.T) {
+	store := newTestStore(t)
+
+	now := time.Now().Truncate(time.Millisecond)
+	for i := 0; i < 5; i++ {
+		_ = store.WriteSample(makeSample(now.Add(time.Duration(i) * time.Second)))
+	}
+	_ = store.Close()
+
+	path := store.tiers[0].path
+	info, err := InspectTierFile(path)
+	if err != nil {
+		t.Fatalf("InspectTierFile() error: %v", err)
+	}
+	if info.Count == 0 {
+		t.Error("InspectTierFile() returned Count = 0")
+	}
+	if info.Version != version {
+		t.Errorf("InspectTierFile() Version = %d, want %d", info.Version, version)
+	}
+	if info.NewestTS.IsZero() {
+		t.Error("InspectTierFile() NewestTS is zero")
+	}
+}
+
+func TestInspectTierFileMissing(t *testing.T) {
+	_, err := InspectTierFile("/nonexistent/path/tier.dat")
+	if err == nil {
+		t.Error("InspectTierFile() on missing file should error")
+	}
+}
+
+func TestInspectTierFileCorrupted(t *testing.T) {
+	f, err := os.CreateTemp(t.TempDir(), "corrupt_*.dat")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, _ = f.Write([]byte("this is not a valid tier file"))
+	_ = f.Close()
+
+	_, err = InspectTierFile(f.Name())
+	if err == nil {
+		t.Error("InspectTierFile() on corrupted file should error")
+	}
+}
+
+// ---- Tier selection (QueryRangeWithMeta) ------------------------------------
+
+func TestQueryRangeWithMetaReturnsTierInfo(t *testing.T) {
 	store := newTestStore(t)
 	defer func() { _ = store.Close() }()
 
-	results, err := store.QueryRange(time.Now(), time.Now().Add(time.Minute))
-	if err != nil {
-		t.Fatalf("QueryRange() error: %v", err)
+	now := time.Now()
+	if err := store.WriteSample(makeSample(now)); err != nil {
+		t.Fatalf("WriteSample: %v", err)
 	}
-	if len(results) != 0 {
-		t.Errorf("Empty store should return 0 results, got %d", len(results))
+
+	result, err := store.QueryRangeWithMeta(now.Add(-time.Minute), now.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("QueryRangeWithMeta: %v", err)
+	}
+	if result.Tier != 0 {
+		t.Errorf("Tier = %d, want 0 (single-tier store)", result.Tier)
+	}
+	if result.Resolution == "" {
+		t.Error("Resolution is empty")
+	}
+	if len(result.Samples) == 0 {
+		t.Error("Samples is empty, expected at least one")
+	}
+}
+
+func TestQueryRangeWithMetaEmptyStore(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	result, err := store.QueryRangeWithMeta(
+		time.Now().Add(-time.Minute),
+		time.Now(),
+	)
+	if err != nil {
+		t.Fatalf("QueryRangeWithMeta on empty store: %v", err)
+	}
+	if len(result.Samples) != 0 {
+		t.Errorf("expected 0 samples, got %d", len(result.Samples))
+	}
+}
+
+// ---- Multi-tier aggregation -------------------------------------------------
+
+func TestMultiTierAggregation(t *testing.T) {
+	store := newMultiTierStore(t)
+	defer func() { _ = store.Close() }()
+
+	// Write 60 consecutive 1-second samples — enough to trigger one tier-2 aggregation.
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < 60; i++ {
+		ts := base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(makeSampleWithCPU(ts, float64(i))); err != nil {
+			t.Fatalf("WriteSample(%d): %v", i, err)
+		}
+	}
+
+	// Tier 2 should have exactly 1 aggregated sample after 60 tier-1 writes.
+	tier2 := store.tiers[1]
+	if tier2.Count() != 1 {
+		t.Errorf("Tier 2 count = %d, want 1 after 60 tier-1 writes", tier2.Count())
+	}
+
+	// The aggregated CPU should be the average of 0..59 = 29.5.
+	samples, err := tier2.ReadRange(base, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Tier 2 ReadRange: %v", err)
+	}
+	if len(samples) != 1 {
+		t.Fatalf("Tier 2 returned %d samples, want 1", len(samples))
+	}
+	got := samples[0].Data.CPU.Total.Usage
+	want := 29.5
+	if got < want-0.5 || got > want+0.5 {
+		t.Errorf("Aggregated CPU = %.2f, want ~%.2f", got, want)
+	}
+}
+
+func TestMultiTierPeakPreservation(t *testing.T) {
+	store := newMultiTierStore(t)
+	defer func() { _ = store.Close() }()
+
+	base := time.Date(2026, 2, 1, 0, 0, 0, 0, time.UTC)
+	peakUsage := 99.0
+	for i := 0; i < 60; i++ {
+		ts := base.Add(time.Duration(i) * time.Second)
+		usage := 10.0
+		if i == 30 {
+			usage = peakUsage // spike in the middle
+		}
+		if err := store.WriteSample(makeSampleWithCPU(ts, usage)); err != nil {
+			t.Fatalf("WriteSample(%d): %v", i, err)
+		}
+	}
+
+	samples, err := store.tiers[1].ReadRange(base, base.Add(time.Minute))
+	if err != nil {
+		t.Fatalf("Tier 2 ReadRange: %v", err)
+	}
+	if len(samples) == 0 {
+		t.Fatal("No samples in tier 2")
+	}
+	agg := samples[0]
+	if agg.PeakCPU == nil {
+		t.Fatal("PeakCPU is nil in aggregated sample")
+	}
+	if *agg.PeakCPU < peakUsage-0.1 {
+		t.Errorf("PeakCPU = %.2f, want >= %.2f (spike should be preserved)", *agg.PeakCPU, peakUsage)
+	}
+}
+
+// ---- fmtRes -----------------------------------------------------------------
+
+func TestFmtRes(t *testing.T) {
+	cases := []struct {
+		dur  time.Duration
+		want string
+	}{
+		{time.Second, "1s"},
+		{30 * time.Second, "30s"},
+		{time.Minute, "1m"},
+		{5 * time.Minute, "5m"},
+		{time.Hour, "1h"},
+		{3 * time.Hour, "3h"},
+		// Non-round seconds fall through to d.String()
+		{500 * time.Millisecond, "500ms"},
+		{90*time.Second + 500*time.Millisecond, "1m30.5s"},
+	}
+	for _, tc := range cases {
+		got := fmtRes(tc.dur)
+		if got != tc.want {
+			t.Errorf("fmtRes(%v) = %q, want %q", tc.dur, got, tc.want)
+		}
+	}
+}
+
+// ---- Concurrent writes ------------------------------------------------------
+
+func TestConcurrentWrites(t *testing.T) {
+	store := newTestStore(t)
+	defer func() { _ = store.Close() }()
+
+	const goroutines = 8
+	const writesPerGoroutine = 50
+
+	base := time.Now()
+	var wg sync.WaitGroup
+	errCh := make(chan error, goroutines*writesPerGoroutine)
+
+	for g := 0; g < goroutines; g++ {
+		wg.Add(1)
+		go func(gid int) {
+			defer wg.Done()
+			for i := 0; i < writesPerGoroutine; i++ {
+				ts := base.Add(time.Duration(gid*1000+i) * time.Millisecond)
+				if err := store.WriteSample(makeSample(ts)); err != nil {
+					errCh <- err
+				}
+			}
+		}(g)
+	}
+	wg.Wait()
+	close(errCh)
+
+	for err := range errCh {
+		t.Errorf("Concurrent WriteSample error: %v", err)
+	}
+
+	results, err := store.QueryRange(base.Add(-time.Second), base.Add(10*time.Second))
+	if err != nil {
+		t.Fatalf("QueryRange error: %v", err)
+	}
+	t.Logf("Concurrent write test: %d/%d samples retrievable",
+		len(results), goroutines*writesPerGoroutine)
+}
+
+// ============================================================================
+// Benchmarks
+// ============================================================================
+
+// newBenchStore creates a temp store for benchmarks, failing the benchmark on error.
+func newBenchStore(b *testing.B, size string, maxBytes int64) *Store {
+	b.Helper()
+	dir := b.TempDir()
+	cfg := config.StorageConfig{
+		Directory: dir,
+		Tiers: []config.TierConfig{
+			{Resolution: time.Second, MaxSize: size, MaxBytes: maxBytes},
+		},
+	}
+	store, err := NewStore(cfg)
+	if err != nil {
+		b.Fatalf("NewStore: %v", err)
+	}
+	return store
+}
+
+// BenchmarkWrite measures sustained sequential write throughput.
+func BenchmarkWrite(b *testing.B) {
+	store := newBenchStore(b, "100MB", 100*1024*1024)
+	defer func() { _ = store.Close() }()
+
+	base := time.Now()
+	sample := makeSample(base)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sample.Timestamp = base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(sample); err != nil {
+			b.Fatalf("WriteSample: %v", err)
+		}
+	}
+	b.SetBytes(int64(b.N)) // samples/op isn't bytes, but useful for rate display
+}
+
+// BenchmarkWriteWrapping benchmarks writes into a small (wrapping) ring buffer.
+func BenchmarkWriteWrapping(b *testing.B) {
+	store := newBenchStore(b, "128KB", 128*1024)
+	defer func() { _ = store.Close() }()
+
+	base := time.Now()
+	sample := makeSample(base)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		sample.Timestamp = base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(sample); err != nil {
+			b.Fatalf("WriteSample: %v", err)
+		}
+	}
+}
+
+// BenchmarkWriteParallel measures concurrent write throughput and lock contention.
+func BenchmarkWriteParallel(b *testing.B) {
+	store := newBenchStore(b, "100MB", 100*1024*1024)
+	defer func() { _ = store.Close() }()
+
+	base := time.Now()
+	b.ReportAllocs()
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		i := 0
+		for pb.Next() {
+			s := makeSample(base.Add(time.Duration(i) * time.Millisecond))
+			if err := store.WriteSample(s); err != nil {
+				b.Errorf("WriteSample: %v", err)
+			}
+			i++
+		}
+	})
+}
+
+// seedStore writes n samples starting at base and returns the store.
+func seedStore(b *testing.B, store *Store, n int) time.Time {
+	b.Helper()
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	for i := 0; i < n; i++ {
+		ts := base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(makeSample(ts)); err != nil {
+			b.Fatalf("seed WriteSample(%d): %v", i, err)
+		}
+	}
+	return base
+}
+
+// BenchmarkQueryRange_Small benchmarks a small read (last 60s of 300 samples).
+func BenchmarkQueryRange_Small(b *testing.B) {
+	store := newBenchStore(b, "50MB", 50*1024*1024)
+	defer func() { _ = store.Close() }()
+
+	base := seedStore(b, store, 300)
+	from := base.Add(240 * time.Second)
+	to := base.Add(300 * time.Second)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.QueryRange(from, to)
+		if err != nil {
+			b.Fatalf("QueryRange: %v", err)
+		}
+	}
+}
+
+// BenchmarkQueryRange_Large benchmarks a full-range read (all 3600 samples).
+func BenchmarkQueryRange_Large(b *testing.B) {
+	store := newBenchStore(b, "50MB", 50*1024*1024)
+	defer func() { _ = store.Close() }()
+
+	n := 3600
+	base := seedStore(b, store, n)
+	from := base
+	to := base.Add(time.Duration(n) * time.Second)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		results, err := store.QueryRange(from, to)
+		if err != nil {
+			b.Fatalf("QueryRange: %v", err)
+		}
+		if len(results) == 0 {
+			b.Fatal("QueryRange returned 0 results")
+		}
+	}
+}
+
+// BenchmarkQueryRange_Wrapped benchmarks reads after the ring buffer has wrapped.
+func BenchmarkQueryRange_Wrapped(b *testing.B) {
+	store := newBenchStore(b, "512KB", 512*1024)
+	defer func() { _ = store.Close() }()
+
+	// Write enough to wrap multiple times
+	n := 2000
+	base := seedStore(b, store, n)
+	from := base.Add(time.Duration(n-60) * time.Second)
+	to := base.Add(time.Duration(n) * time.Second)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.QueryRange(from, to)
+		if err != nil {
+			b.Fatalf("QueryRange: %v", err)
+		}
+	}
+}
+
+// BenchmarkQueryLatest_Cache benchmarks the warmed in-memory cache path.
+// This is the steady-state hot path — called every second during live monitoring.
+func BenchmarkQueryLatest_Cache(b *testing.B) {
+	store := newBenchStore(b, "10MB", 10*1024*1024)
+	defer func() { _ = store.Close() }()
+	seedStore(b, store, 100) // ensures cache is populated
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, err := store.QueryLatest()
+		if err != nil {
+			b.Fatalf("QueryLatest: %v", err)
+		}
+	}
+}
+
+// BenchmarkQueryLatest_ColdDisk benchmarks the cold-start disk-scan path.
+// This runs only once per process lifetime (warmLatestCache in NewStore).
+// Kept to catch regressions in the full-scan fallback code path.
+func BenchmarkQueryLatest_ColdDisk(b *testing.B) {
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		b.StopTimer()
+		store := newBenchStore(b, "10MB", 10*1024*1024)
+		// Seed via tiers[0].Write directly to bypass the cache update in WriteSample
+		base := time.Now()
+		for j := 0; j < 100; j++ {
+			ts := base.Add(time.Duration(j) * time.Second)
+			as := &AggregatedSample{
+				Timestamp: ts,
+				Duration:  time.Second,
+				Data:      makeSample(ts),
+			}
+			_ = store.tiers[0].Write(as)
+		}
+		// Nil the cache to simulate a cold read (before warmLatestCache)
+		store.latestCache = nil
+		b.StartTimer()
+		_, _ = store.tiers[0].ReadLatest(1)
+		b.StopTimer()
+		_ = store.Close()
+		b.StartTimer()
+	}
+}
+
+// BenchmarkAggregateSamples benchmarks the aggregation path triggered by multi-tier writes.
+func BenchmarkAggregateSamples(b *testing.B) {
+	dir := b.TempDir()
+	cfg := config.StorageConfig{
+		Directory: dir,
+		Tiers: []config.TierConfig{
+			{Resolution: time.Second, MaxSize: "100MB", MaxBytes: 100 * 1024 * 1024},
+			{Resolution: time.Minute, MaxSize: "100MB", MaxBytes: 100 * 1024 * 1024},
+		},
+	}
+	store, err := NewStore(cfg)
+	if err != nil {
+		b.Fatalf("NewStore: %v", err)
+	}
+	defer func() { _ = store.Close() }()
+
+	base := time.Now()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		// Every 60th write triggers aggregateSamples
+		ts := base.Add(time.Duration(i) * time.Second)
+		if err := store.WriteSample(makeSample(ts)); err != nil {
+			b.Fatalf("WriteSample: %v", err)
+		}
+	}
+}
+
+// BenchmarkDownsampling benchmarks the inline downsampler in QueryRangeWithMeta
+// that kicks in when a query returns >800 samples.
+func BenchmarkDownsampling(b *testing.B) {
+	store := newBenchStore(b, "100MB", 100*1024*1024)
+	defer func() { _ = store.Close() }()
+
+	// Seed with 3600 samples (1 hour at 1s res) — downsampling kicks in at >800.
+	n := 3600
+	base := seedStore(b, store, n)
+	from := base
+	to := base.Add(time.Duration(n) * time.Second)
+
+	b.ReportAllocs()
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		result, err := store.QueryRangeWithMeta(from, to)
+		if err != nil {
+			b.Fatalf("QueryRangeWithMeta: %v", err)
+		}
+		if len(result.Samples) == 0 {
+			b.Fatal("no samples returned")
+		}
 	}
 }

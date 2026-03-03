@@ -67,27 +67,23 @@ func (r cpuRaw) total() uint64 {
 func calcCorePct(prev, cur cpuRaw) CPUCoreStats {
 	totalDelta := float64(cur.total() - prev.total())
 	if totalDelta == 0 {
-		return CPUCoreStats{ID: cur.id}
+		return CPUCoreStats{}
 	}
 
 	pct := func(prevVal, curVal uint64) float64 {
 		return round2(float64(curVal-prevVal) / totalDelta * 100.0)
 	}
 
+	idlePct := pct(prev.idle, cur.idle)
 	cs := CPUCoreStats{
-		ID:      cur.id,
 		User:    pct(prev.user, cur.user),
-		Nice:    pct(prev.nice, cur.nice),
 		System:  pct(prev.system, cur.system),
-		Idle:    pct(prev.idle, cur.idle),
 		IOWait:  pct(prev.iowait, cur.iowait),
 		IRQ:     pct(prev.irq, cur.irq),
 		SoftIRQ: pct(prev.softirq, cur.softirq),
 		Steal:   pct(prev.steal, cur.steal),
-		Guest:   pct(prev.guest, cur.guest),
-		GuestNi: pct(prev.guestNice, cur.guestNice),
 	}
-	cs.Usage = round2(100.0 - cs.Idle)
+	cs.Usage = round2(100.0 - idlePct)
 	return cs
 }
 
@@ -112,7 +108,7 @@ func (c *Collector) collectCPU(_ float64) CPUStats {
 		// First collection — no delta yet
 		for _, cur := range current {
 			if cur.id == "cpu" {
-				result.Total = CPUCoreStats{ID: cur.id}
+				result.Total = CPUCoreStats{}
 			} else {
 				numCores++
 			}
@@ -149,19 +145,14 @@ func collectLoadAvg() LoadAvg {
 func collectMemory() MemoryStats {
 	m := parseMemInfo()
 	mem := MemoryStats{
-		Total:        m["MemTotal"],
-		Free:         m["MemFree"],
-		Available:    m["MemAvailable"],
-		Buffers:      m["Buffers"],
-		Cached:       m["Cached"],
-		SReclaimable: m["SReclaimable"],
-		SUnreclaim:   m["SUnreclaim"],
-		Shmem:        m["Shmem"],
-		Dirty:        m["Dirty"],
-		Writeback:    m["Writeback"],
-		Mapped:       m["Mapped"],
+		Total:     m["MemTotal"],
+		Free:      m["MemFree"],
+		Available: m["MemAvailable"],
+		Buffers:   m["Buffers"],
+		Cached:    m["Cached"],
+		Shmem:     m["Shmem"],
 	}
-	mem.Used = mem.Total - mem.Free - mem.Buffers - mem.Cached - mem.SReclaimable
+	mem.Used = mem.Total - mem.Free - mem.Buffers - mem.Cached
 	if mem.Total > 0 {
 		mem.UsedPercent = round2(float64(mem.Used) / float64(mem.Total) * 100.0)
 	}
@@ -171,9 +162,8 @@ func collectMemory() MemoryStats {
 func collectSwap() SwapStats {
 	m := parseMemInfo()
 	s := SwapStats{
-		Total:  m["SwapTotal"],
-		Free:   m["SwapFree"],
-		Cached: m["SwapCached"],
+		Total: m["SwapTotal"],
+		Free:  m["SwapFree"],
 	}
 	s.Used = s.Total - s.Free
 	if s.Total > 0 {
