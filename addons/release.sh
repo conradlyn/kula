@@ -22,6 +22,14 @@ for f in kula-linux-* ; do
     rm -rf kula
 done
 
+cd ..
+# building deb packages for all archs
+for arch in amd64 arm64 riscv64; do
+    ./addons/build_deb.sh "$arch"
+done
+cd -
+
 echo "Release done!"
 pwd
 ls -1 $(pwd)/*.tar.gz
+ls -1 $(pwd)/*.deb
