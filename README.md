@@ -100,9 +100,9 @@ The frontend is a single-page application embedded in the binary. Built on Chart
 ### Standalone
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.5.0/kula-0.5.0-amd64.tar.gz
-echo "d27072c447e222e998abf8789f5c96ac578d885c167f82b49aa560e755fc6963 kula-0.5.0-amd64.tar.gz" | sha256sum -c || rm kula-0.5.0-amd64.tar.gz
-tar -xvf kula-0.5.0-amd64.tar.gz
+wget https://github.com/c0m4r/kula/releases/download/0.6.0/kula-0.6.0-amd64.tar.gz
+echo "cacf96db56dd9081866dad34c4d7d5b854a97f2837283cfe475f5c9d1e6b972f kula-0.6.0-amd64.tar.gz" | sha256sum -c || rm kula-0.6.0-amd64.tar.gz
+tar -xvf kula-0.6.0-amd64.tar.gz
 cd kula
 ./kula
 ```
@@ -110,9 +110,9 @@ cd kula
 ### Debian/Ubuntu
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.5.0/kula_0.5.0_amd64.deb
-echo "e9d124f4f6711a7ae7855e766e0fd1fa1b2f3f7bf4c155dcb9c98d6123aebdd0 kula_0.5.0_amd64.deb" | sha256sum -c || rm kula_0.5.0_amd64.deb
-sudo dpkg -i kula_0.5.0_amd64.deb
+wget https://github.com/c0m4r/kula/releases/download/0.6.0/kula_0.6.0_amd64.deb
+echo "36fb8d016986c3bd5ad1faf1040ce74675f6bd9f9a891b7e7f7ded0bf25903fb kula_0.6.0_amd64.deb" | sha256sum -c || rm kula_0.6.0_amd64.deb
+sudo dpkg -i kula_0.6.0_amd64.deb
 systemctl status kula
 ```
 
