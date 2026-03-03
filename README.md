@@ -120,8 +120,6 @@ sudo dpkg -i kula_0.6.0_amd64.deb
 systemctl status kula
 ```
 
-### Multi-arch
-
 ### Build from Source
 
 ```bash
