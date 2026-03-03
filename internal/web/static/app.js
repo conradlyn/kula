@@ -36,7 +36,6 @@
         focusVisible: JSON.parse(localStorage.getItem('kula_focus_visible') || 'null'),
         currentResolution: '1s', // resolution of data currently loaded in charts
         liveQueue: [],        // samples buffered while history is loading
-        diskDeviceNames: [],  // device names matching diskutil chart datasets
         diskSpaceMountNames: [], // mount names matching diskspace chart datasets
     };
 
@@ -257,11 +256,7 @@
             tooltip: { callbacks: { label: ctx => ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s' } }
         });
 
-        // Disk Utilization
-        // Disk Utilization — datasets are added dynamically per device on first sample
-        state.diskDeviceNames = [];
-        state.charts.diskutil = createTimeSeriesChart('chart-disk-util', [],
-            { max: 100, ticks: { callback: v => v + '%' } });
+
 
         // Disk Space
         // Disk Space — datasets are added dynamically per mount on first sample
@@ -418,40 +413,7 @@
             state.charts.diskio.data.datasets[1].data.push(point(wBps));
         }
 
-        // Disk Utilization — one dataset per device, created dynamically
-        if (state.charts.diskutil && s.disk?.devices && s.disk.devices.length > 0) {
-            const diskColorPairs = [
-                [colors.purple, colors.purpleAlpha],
-                [colors.cyan, colors.cyanAlpha],
-                [colors.orange, colors.orangeAlpha],
-                [colors.green, colors.greenAlpha],
-                [colors.pink, colors.pinkAlpha],
-                [colors.yellow, colors.yellowAlpha],
-                [colors.blue, colors.blueAlpha],
-                [colors.teal, colors.tealAlpha],
-            ];
-            const incomingNames = s.disk.devices.map(d => d.name);
-            if (incomingNames.join(',') !== state.diskDeviceNames.join(',')) {
-                // Device set changed — rebuild datasets, preserving nothing
-                state.diskDeviceNames = incomingNames;
-                state.charts.diskutil.data.datasets = incomingNames.map((name, i) => ({
-                    label: name,
-                    borderColor: diskColorPairs[i % diskColorPairs.length][0],
-                    backgroundColor: diskColorPairs[i % diskColorPairs.length][1],
-                    fill: false,
-                    data: [],
-                }));
-            }
-            s.disk.devices.forEach((d, i) => {
-                if (i < state.charts.diskutil.data.datasets.length) {
-                    // For disk util we only have overall peak disk util across all devices.
-                    // But maybe d.util_pct is fine, wait, item.peak_disk_util is overall.
-                    // We can just use item.peak_disk_util for the highest utilized disk, 
-                    // or just use d.util_pct since we don't have per-disk peaks.
-                    state.charts.diskutil.data.datasets[i].data.push(point(d.util_pct));
-                }
-            });
-        }
+
 
         // Disk Space — one dataset per mount, created dynamically
         if (state.charts.diskspace && s.disk?.filesystems && s.disk.filesystems.length > 0) {
@@ -1360,7 +1322,7 @@
     const chartCardIds = [
         'card-cpu', 'card-loadavg', 'card-memory', 'card-swap',
         'card-network', 'card-pps', 'card-connections',
-        'card-disk-io', 'card-disk-util', 'card-disk-space',
+        'card-disk-io', 'card-disk-space',
         'card-processes', 'card-entropy', 'card-self'
     ];
 
