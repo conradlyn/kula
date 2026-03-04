@@ -16,6 +16,7 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 - Storage benchmark suite
 - New unit tests
 - New metrics displayed — Shmem, IOPS, TCP error rates, File Descriptors
+- Expandable graphs
 
 ### Changed
 
@@ -30,6 +31,7 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 ### Fixed
 
 - Fixed hardcoded tier resolutions in web UI
+- Less anoying tooltips
 
 ### Removed
 
