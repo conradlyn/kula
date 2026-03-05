@@ -7,17 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
-## [Unreleased]
+## [0.7.1] - 2026-03-05
 
 ### Added
 
 - dev console welcome message
-- update check script
+- script checking available kula updates
+- script checking available go module updates
 
 ### Changed
 
 - inspect_tier.py: lint refactor
 - startup time optimizations
+- updated go module: clipperhouse/displaywidt
+- updated go module: clipperhouse/uax29/v2
+
+### Removed
+
+- removed go module: clipperhouse/stringish
 
 ## [0.7.0] - 2026-03-04
 
