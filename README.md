@@ -104,9 +104,9 @@ Check [Releases](https://github.com/c0m4r/kula/releases) for **ARM** and **RISC-
 ### Standalone
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.6.0/kula-0.6.0-amd64.tar.gz
-echo "cacf96db56dd9081866dad34c4d7d5b854a97f2837283cfe475f5c9d1e6b972f kula-0.6.0-amd64.tar.gz" | sha256sum -c || rm kula-0.6.0-amd64.tar.gz
-tar -xvf kula-0.6.0-amd64.tar.gz
+wget https://github.com/c0m4r/kula/releases/download/0.7.1/kula-0.7.1-amd64.tar.gz
+echo "6baff6bee9f9bbf56adc6e264e7ff9e1dfa763e7bab76a21dbc1e7d4be0397f4 kula-0.7.1-amd64.tar.gz" | sha256sum -c || rm kula-0.7.1-amd64.tar.gz
+tar -xvf kula-0.7.1-amd64.tar.gz
 cd kula
 ./kula
 ```
@@ -114,9 +114,9 @@ cd kula
 ### Debian/Ubuntu
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.6.0/kula_0.6.0_amd64.deb
-echo "36fb8d016986c3bd5ad1faf1040ce74675f6bd9f9a891b7e7f7ded0bf25903fb kula_0.6.0_amd64.deb" | sha256sum -c || rm kula_0.6.0_amd64.deb
-sudo dpkg -i kula_0.6.0_amd64.deb
+wget https://github.com/c0m4r/kula/releases/download/0.7.1/kula_0.7.1_amd64.deb
+echo "bbcd6ee65441c85f5bc835c40a1afaabc78b78d976c25e535c051b29ad514185 kula_0.7.1_amd64.deb" | sha256sum -c || rm kula_0.7.1_amd64.deb
+sudo dpkg -i kula_0.7.1_amd64.deb
 systemctl status kula
 ```
 
