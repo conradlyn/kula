@@ -70,14 +70,21 @@ func main() {
 		cmd = flag.Arg(0)
 	}
 
-	// Handle commands that don't need config
 	if cmd == "hash-password" {
+		// Just to read the password, we don't return yet as we need the config
 		password := readPasswordWithAsterisks()
-		web.PrintHashedPassword(password)
+
+		// Load config
+		cfg, err := config.Load(*configPath)
+		if err != nil {
+			log.Fatalf("Failed to load config: %v", err)
+		}
+
+		web.PrintHashedPassword(password, cfg.Web.Auth.Argon2)
 		return
 	}
 
-	// Load config
+	// Load config for other commands
 	cfg, err := config.Load(*configPath)
 	if err != nil {
 		log.Fatalf("Failed to load config: %v", err)

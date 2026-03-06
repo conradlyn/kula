@@ -42,10 +42,18 @@ web:
   auth:
     enabled: false
     username: admin
-    # Generate hash with: kula hash-password
+    # Generate hash and salt with: ./kula hash-password
+    # Copy the output into the fields below:
     password_hash: ""
     password_salt: ""
     session_timeout: 24h
+    argon2:
+      # Tune based on modern hardware:
+      # https://cheatsheetseries.owasp.org/cheatsheets/Password_Storage_Cheat_Sheet.html
+      # time: 2-4, memory: 65536-262144
+      time: 1
+      memory: 65536
+      threads: 4
 
 # TUI settings
 tui:

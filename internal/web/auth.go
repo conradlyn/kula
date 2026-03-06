@@ -85,15 +85,11 @@ func (rl *RateLimiter) Allow(ip string) bool {
 	return true
 }
 
-// HashPassword creates an Argon2id hash with the given salt.
-func HashPassword(password, salt string) string {
-	// Standard Argon2id parameters
-	timeParam := uint32(1)
-	memory := uint32(64 * 1024)
-	threads := uint8(4)
+// HashPassword creates an Argon2id hash with the given salt and parameters.
+func HashPassword(password, salt string, params config.Argon2Config) string {
 	keyLen := uint32(32)
 
-	hash := argon2.IDKey([]byte(password), []byte(salt), timeParam, memory, threads, keyLen)
+	hash := argon2.IDKey([]byte(password), []byte(salt), params.Time, params.Memory, params.Threads, keyLen)
 	return hex.EncodeToString(hash)
 }
 
@@ -116,7 +112,7 @@ func (a *AuthManager) ValidateCredentials(username, password string) bool {
 		return false
 	}
 
-	hash := HashPassword(password, a.cfg.PasswordSalt)
+	hash := HashPassword(password, a.cfg.PasswordSalt, a.cfg.Argon2)
 	return subtle.ConstantTimeCompare([]byte(hash), []byte(a.cfg.PasswordHash)) == 1
 }
 
@@ -289,18 +285,24 @@ func generateToken() (string, error) {
 	return hex.EncodeToString(b), nil
 }
 
-// PrintHashedPassword generates and prints a hash for a password.
-func PrintHashedPassword(password string) {
+// PrintHashedPassword generates and prints a hash for a password using the given Argon2 parameters.
+func PrintHashedPassword(password string, params config.Argon2Config) {
 	salt, err := GenerateSalt()
 	if err != nil {
 		fmt.Printf("Error generating salt: %v\n", err)
 		return
 	}
 
-	hash := HashPassword(password, salt)
+	hash := HashPassword(password, salt, params)
+	fmt.Printf("Password hash algorithm: Argon2id\n")
+	fmt.Printf("Time: %d, Memory: %d KB, Threads: %d\n", params.Time, params.Memory, params.Threads)
 	fmt.Printf("Password hash: %s\n", hash)
 	fmt.Printf("Salt: %s\n", salt)
-	fmt.Println("\nAdd these to your config.yaml:")
+	fmt.Println("\nAdd these to your config.yaml under web.auth:")
 	fmt.Printf("  password_hash: \"%s\"\n", hash)
 	fmt.Printf("  password_salt: \"%s\"\n", salt)
+	fmt.Printf("  argon2:\n")
+	fmt.Printf("    time: %d\n", params.Time)
+	fmt.Printf("    memory: %d\n", params.Memory)
+	fmt.Printf("    threads: %d\n", params.Threads)
 }

@@ -8,32 +8,38 @@ import (
 	"time"
 )
 
+var defaultArgonParams = config.Argon2Config{
+	Time:    1,
+	Memory:  64 * 1024,
+	Threads: 4,
+}
+
 func TestHashPasswordDeterminism(t *testing.T) {
-	hash1 := HashPassword("testpass", "salt123")
-	hash2 := HashPassword("testpass", "salt123")
+	hash1 := HashPassword("testpass", "salt123", defaultArgonParams)
+	hash2 := HashPassword("testpass", "salt123", defaultArgonParams)
 	if hash1 != hash2 {
 		t.Errorf("HashPassword not deterministic: %q != %q", hash1, hash2)
 	}
 }
 
 func TestHashPasswordDifferentSalts(t *testing.T) {
-	hash1 := HashPassword("testpass", "salt1")
-	hash2 := HashPassword("testpass", "salt2")
+	hash1 := HashPassword("testpass", "salt1", defaultArgonParams)
+	hash2 := HashPassword("testpass", "salt2", defaultArgonParams)
 	if hash1 == hash2 {
 		t.Error("Same password with different salts should produce different hashes")
 	}
 }
 
 func TestHashPasswordDifferentPasswords(t *testing.T) {
-	hash1 := HashPassword("pass1", "same_salt")
-	hash2 := HashPassword("pass2", "same_salt")
+	hash1 := HashPassword("pass1", "same_salt", defaultArgonParams)
+	hash2 := HashPassword("pass2", "same_salt", defaultArgonParams)
 	if hash1 == hash2 {
 		t.Error("Different passwords with same salt should produce different hashes")
 	}
 }
 
 func TestHashPasswordLength(t *testing.T) {
-	hash := HashPassword("test", "salt")
+	hash := HashPassword("test", "salt", defaultArgonParams)
 	// Argon2id produces 256-bit hash = 32 bytes = 64 hex chars based on keyLen=32
 	if len(hash) != 64 {
 		t.Errorf("Hash length = %d, want 64 hex chars (Argon2id 256-bit)", len(hash))
@@ -67,12 +73,13 @@ func TestValidateCredentialsDisabled(t *testing.T) {
 
 func TestValidateCredentialsCorrect(t *testing.T) {
 	salt, _ := GenerateSalt()
-	hash := HashPassword("secret", salt)
+	hash := HashPassword("secret", salt, defaultArgonParams)
 	am := NewAuthManager(config.AuthConfig{
 		Enabled:      true,
 		Username:     "admin",
 		PasswordHash: hash,
 		PasswordSalt: salt,
+		Argon2:       defaultArgonParams,
 	}, "")
 	if !am.ValidateCredentials("admin", "secret") {
 		t.Error("Valid credentials should pass")
@@ -81,12 +88,13 @@ func TestValidateCredentialsCorrect(t *testing.T) {
 
 func TestValidateCredentialsWrong(t *testing.T) {
 	salt, _ := GenerateSalt()
-	hash := HashPassword("secret", salt)
+	hash := HashPassword("secret", salt, defaultArgonParams)
 	am := NewAuthManager(config.AuthConfig{
 		Enabled:      true,
 		Username:     "admin",
 		PasswordHash: hash,
 		PasswordSalt: salt,
+		Argon2:       defaultArgonParams,
 	}, "")
 	if am.ValidateCredentials("admin", "wrong") {
 		t.Error("Wrong password should fail")

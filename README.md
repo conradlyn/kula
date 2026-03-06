@@ -132,6 +132,16 @@ bash addons/build.sh
 
 ## Usage
 
+### Security Recommendations
+
+Kula uses **Argon2id** for password hashing. If you enable authentication, it is highly recommended to tune the Argon2 parameters (`time`, `memory`, `threads`) in `config.yaml` based on your hardware capabilities to increase resistance against cracking.
+
+**Important:** Your `config.yaml` file contains the plaintext `password_salt` and the generated `password_hash`. Ensure the configuration file is protected from unauthorized access on the server:
+
+```bash
+chmod 0600 /path/to/kula/config.yaml
+```
+
 ### Quick Start
 
 ```bash

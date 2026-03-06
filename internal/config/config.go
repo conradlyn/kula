@@ -57,6 +57,13 @@ type AuthConfig struct {
 	PasswordHash   string        `yaml:"password_hash"`
 	PasswordSalt   string        `yaml:"password_salt"`
 	SessionTimeout time.Duration `yaml:"session_timeout"`
+	Argon2         Argon2Config  `yaml:"argon2"`
+}
+
+type Argon2Config struct {
+	Time    uint32 `yaml:"time"`
+	Memory  uint32 `yaml:"memory"` // memory in KB
+	Threads uint8  `yaml:"threads"`
 }
 
 type TUIConfig struct {
@@ -92,6 +99,11 @@ func DefaultConfig() *Config {
 			Port:    8080,
 			Auth: AuthConfig{
 				SessionTimeout: 24 * time.Hour,
+				Argon2: Argon2Config{
+					Time:    1,
+					Memory:  64 * 1024,
+					Threads: 4,
+				},
 			},
 			Logging: LogConfig{
 				Enabled: true,
