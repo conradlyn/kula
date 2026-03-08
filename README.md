@@ -122,9 +122,9 @@ docker run --rm -it --name kula --pid host --network host -v /proc:/proc:ro c0m4
 ### Debian/Ubuntu
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.7.2/kula_0.7.2_amd64.deb
-echo "51be1330fff5262a6541f1c60b749593abfc4dc82cb322a41d1ae2b15c81f758 kula_0.7.2_amd64.deb" | sha256sum -c || rm kula_0.7.2_amd64.deb
-sudo dpkg -i kula_0.7.2_amd64.deb
+wget https://github.com/c0m4r/kula/releases/download/0.7.2/kula-0.7.2-amd64.deb
+echo "51be1330fff5262a6541f1c60b749593abfc4dc82cb322a41d1ae2b15c81f758 kula-0.7.2-amd64.deb" | sha256sum -c || rm kula-0.7.2-amd64.deb
+sudo dpkg -i kula-0.7.2-amd64.deb
 systemctl status kula
 ```
 
@@ -251,7 +251,7 @@ bash addons/build.sh cross    # builds amd64, arm64, riscv64
 
 ```bash
 bash addons/build_deb.sh
-sudo dpkg -i dist/kula_*.deb
+ls -1 dist/kula_*.deb
 ```
 
 ### Arch Linux (AUR)
