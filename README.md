@@ -251,7 +251,7 @@ bash addons/build.sh cross    # builds amd64, arm64, riscv64
 
 ```bash
 bash addons/build_deb.sh
-ls -1 dist/kula_*.deb
+ls -1 dist/kula-*.deb
 ```
 
 ### Arch Linux / Manjaro (AUR)
@@ -265,7 +265,7 @@ cd dist/aur && makepkg -si
 
 ```bash
 bash addons/build_rpm.sh
-ls -1 dist/kula_*.rpm
+ls -1 dist/kula-*.rpm
 ```
 
 ### Docker
