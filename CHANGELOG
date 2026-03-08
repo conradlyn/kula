@@ -11,7 +11,11 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
 ### Added
 
-- First docker hub image release
+- More installation methods
+
+### Changed
+
+- Helper scripts enhancements
 
 ### Fixed
 
@@ -21,6 +25,7 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
 ### Added
 
+- First docker hub image release
 - Space Invaders: new high score message and sound effect
 - collector unit tests
 - Light theme & ability to toggle light/dark mode

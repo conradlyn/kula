@@ -50,7 +50,7 @@ PKG_NAME="kula"
 MAINTAINER="c0m4r"
 DESCRIPTION="Lightweight system monitoring daemon."
 BUILD_DIR="build_deb"
-PKG_DIR="${BUILD_DIR}/${PKG_NAME}_${VERSION}_${ARCH}"
+PKG_DIR="${BUILD_DIR}/${PKG_NAME}-${VERSION}-${ARCH}"
 
 # Check if binary exists, build if not
 if [ ! -f "dist/kula-linux-${VERSION}-${ARCH}" ]; then
@@ -158,7 +158,7 @@ dpkg-deb --root-owner-group --build "${PKG_DIR}"
 
 # Move the package to current dir
 mkdir -p dist
-mv "${BUILD_DIR}/${PKG_NAME}_${VERSION}_${ARCH}.deb" dist/
+mv "${BUILD_DIR}/${PKG_NAME}-${VERSION}-${ARCH}.deb" dist/
 rm -rf "$BUILD_DIR"
 
-echo "Package built: ${PKG_NAME}_${VERSION}_${ARCH}.deb"
+echo "Package built: ${PKG_NAME}-${VERSION}-${ARCH}.deb"
