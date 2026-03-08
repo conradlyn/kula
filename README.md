@@ -128,6 +128,16 @@ sudo dpkg -i kula_0.7.2_amd64.deb
 systemctl status kula
 ```
 
+### Arch/Manjaro (AUR)
+
+```bash
+wget https://github.com/c0m4r/kula/releases/download/0.7.2/kula-0.7.2-aur.tar.gz
+echo "5d3882fd0c4d46e08ae6d70e848960505eb0997cf816982af9e99480fad8f24e kula-0.7.2-aur.tar.gz" | sha256sum -c || rm kula-0.7.2-aur.tar.gz
+tar -xvf kula-0.7.2-aur.tar.gz 
+cd kula-0.7.2-aur
+makepkg -si
+```
+
 ### Build from Source
 
 ```bash
