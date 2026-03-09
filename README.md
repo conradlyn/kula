@@ -144,7 +144,7 @@ systemctl status kula
 
 ```bash
 wget https://github.com/c0m4r/kula/releases/download/0.7.4/kula-0.7.4-aur.tar.gz
-echo "<checksum> kula-0.7.4-aur.tar.gz" | sha256sum -c || rm kula-0.7.4-aur.tar.gz
+echo "dffc7bf3adbb2476f690d494c6f086d64088c10ac4705663a6488849e96478c8 kula-0.7.4-aur.tar.gz" | sha256sum -c || rm kula-0.7.4-aur.tar.gz
 tar -xvf kula-0.7.4-aur.tar.gz 
 cd kula-0.7.4-aur
 makepkg -si
