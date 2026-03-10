@@ -44,9 +44,11 @@
         currentAggregation: localStorage.getItem('kula_aggregation') || 'avg',
         selectedNet: localStorage.getItem('kula_sel_net') || null,
         selectedDiskIo: localStorage.getItem('kula_sel_diskio') || null,
+        selectedDiskTemp: localStorage.getItem('kula_sel_disktemp') || null,
         selectedDiskSpace: localStorage.getItem('kula_sel_diskspace') || null,
         netOptions: [],
         diskIoOptions: [],
+        diskTempOptions: [],
         diskSpaceOptions: [],
         configMax: {}, // loaded from server /api/config
         lastHistoricalTs: null,
@@ -617,7 +619,7 @@
         // Disk Temperature
         const diskTempCard = document.getElementById('card-disk-temp');
         if (state.charts.disktemp && s.disk?.devices) {
-            const d = s.disk.devices.find(d => d.name === state.selectedDiskIo);
+            const d = s.disk.devices.find(d => d.name === state.selectedDiskTemp);
             const hasSensors = d && d.sensors && d.sensors.length > 0;
             const hasTemp = d && d.temp > 0;
 
@@ -768,7 +770,11 @@
                         selNet.appendChild(opt);
                     });
                     selNet.value = state.selectedNet;
-                    selNet.classList.remove('hidden');
+                    if (ifaces.length > 1) {
+                        selNet.classList.remove('hidden');
+                    } else {
+                        selNet.classList.add('hidden');
+                    }
                     selNet.onchange = (e) => {
                         state.selectedNet = e.target.value;
                         if (selPps) selPps.value = state.selectedNet;
@@ -786,7 +792,11 @@
                         selPps.appendChild(opt);
                     });
                     selPps.value = state.selectedNet;
-                    selPps.classList.remove('hidden');
+                    if (ifaces.length > 1) {
+                        selPps.classList.remove('hidden');
+                    } else {
+                        selPps.classList.add('hidden');
+                    }
                     selPps.onchange = (e) => {
                         state.selectedNet = e.target.value;
                         if (selNet) selNet.value = state.selectedNet;
@@ -815,10 +825,48 @@
                         sel.appendChild(opt);
                     });
                     sel.value = state.selectedDiskIo;
-                    sel.classList.remove('hidden');
+                    if (devs.length > 1) {
+                        sel.classList.remove('hidden');
+                    } else {
+                        sel.classList.add('hidden');
+                    }
                     sel.onchange = (e) => {
                         state.selectedDiskIo = e.target.value;
                         localStorage.setItem('kula_sel_diskio', state.selectedDiskIo);
+                        redrawChartsFromBuffer();
+                    };
+                }
+            }
+        }
+
+        if (s.disk && s.disk.devices) {
+            const tempDevs = s.disk.devices.filter(d => d.temp > 0 || (d.sensors && d.sensors.length > 0)).map(d => d.name).sort();
+            if (tempDevs.join(',') !== state.diskTempOptions.join(',')) {
+                state.diskTempOptions = tempDevs;
+                const sel = el('disktemp-selector');
+                if (sel) {
+                    if (!state.selectedDiskTemp || !tempDevs.includes(state.selectedDiskTemp)) {
+                        state.selectedDiskTemp = tempDevs[0] || '';
+                        if (state.selectedDiskTemp) {
+                            localStorage.setItem('kula_sel_disktemp', state.selectedDiskTemp);
+                        }
+                    }
+                    sel.innerHTML = '';
+                    tempDevs.forEach(d => {
+                        const opt = document.createElement('option');
+                        opt.value = d;
+                        opt.textContent = d;
+                        sel.appendChild(opt);
+                    });
+                    sel.value = state.selectedDiskTemp;
+                    if (tempDevs.length > 1) {
+                        sel.classList.remove('hidden');
+                    } else {
+                        sel.classList.add('hidden');
+                    }
+                    sel.onchange = (e) => {
+                        state.selectedDiskTemp = e.target.value;
+                        localStorage.setItem('kula_sel_disktemp', state.selectedDiskTemp);
                         redrawChartsFromBuffer();
                     };
                 }
@@ -843,7 +891,11 @@
                         sel.appendChild(opt);
                     });
                     sel.value = state.selectedDiskSpace;
-                    sel.classList.remove('hidden');
+                    if (mounts.length > 1) {
+                        sel.classList.remove('hidden');
+                    } else {
+                        sel.classList.add('hidden');
+                    }
                     sel.onchange = (e) => {
                         state.selectedDiskSpace = e.target.value;
                         localStorage.setItem('kula_sel_diskspace', state.selectedDiskSpace);
@@ -1232,25 +1284,30 @@
             el('conn-subtitle', `estab:${s.net?.tcp?.curr_estab || 0} err:${errs}/s rst:${rsts}/s`);
         }
         if (s.disk?.devices) {
-            let r = 0, w = 0, rIops = 0, wIops = 0, temp = 0;
+            let r = 0, w = 0, rIops = 0, wIops = 0;
             const d = s.disk.devices.find(d => d.name === state.selectedDiskIo);
             if (d) {
                 r = d.read_bps || 0; w = d.write_bps || 0;
                 rIops = d.reads_ps || 0; wIops = d.writes_ps || 0;
-                temp = d.temp || 0;
                 el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
-
-                if (temp > 0) {
-                    el('disktemp-subtitle', `${temp.toFixed(1)}°C`);
-                } else {
-                    el('disktemp-subtitle', '');
-                }
             } else if (!state.selectedDiskIo) {
                 s.disk.devices.forEach(d => {
                     r += d.read_bps || 0; w += d.write_bps || 0;
                     rIops += d.reads_ps || 0; wIops += d.writes_ps || 0;
                 });
                 el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
+            }
+
+            let temp = 0;
+            const dt = s.disk.devices.find(d => d.name === state.selectedDiskTemp);
+            if (dt) {
+                temp = dt.temp || 0;
+                if (temp > 0) {
+                    el('disktemp-subtitle', `${temp.toFixed(1)}°C`);
+                } else {
+                    el('disktemp-subtitle', '');
+                }
+            } else if (!state.selectedDiskTemp) {
                 el('disktemp-subtitle', '');
             }
         }
@@ -1976,6 +2033,7 @@
             // Check if this graph needs a settings button
             let graphId = null;
             if (card.id === 'card-cpu-temp') graphId = 'cpu_temp';
+            else if (card.id === 'card-disk-temp') graphId = 'disk_temp';
             else if (card.id === 'card-network') graphId = 'network';
 
             if (graphId) {
@@ -2028,7 +2086,7 @@
 
                 const input = document.createElement('input');
                 input.type = 'number';
-                input.placeholder = graphId === 'cpu_temp' ? '°C' : 'Mbps';
+                input.placeholder = graphId === 'network' ? 'Mbps' : '°C';
                 input.style.width = '100%';
                 input.style.padding = '0.3rem';
                 input.style.borderRadius = 'var(--radius-sm)';
@@ -2063,7 +2121,7 @@
                     let prefs = {};
                     try { prefs = JSON.parse(localStorage.getItem('kula_graphs_max') || '{}'); } catch (e) { }
                     let cur = prefs[graphId] || (state.configMax && state.configMax[graphId]);
-                    if (!cur) cur = { mode: 'off', value: graphId === 'cpu_temp' ? 100 : 1000 };
+                    if (!cur) cur = { mode: 'off', value: graphId === 'network' ? 1000 : 100 };
 
                     let uiMode = cur.mode === 'auto' ? 'on' : cur.mode;
                     let uiVal = cur.value;
@@ -2072,7 +2130,7 @@
                     }
                     if (uiMode === 'off') {
                         // Keep a sensible default loaded behind the scenes so if they toggle 'on' they see a valid prompt
-                        if (!uiVal) uiVal = (graphId === 'cpu_temp') ? 100 : 1000;
+                        if (!uiVal) uiVal = (graphId === 'network') ? 1000 : 100;
                         if (cur.auto && cur.auto > 0) uiVal = cur.auto;
                     }
 
@@ -2100,7 +2158,7 @@
                     try { prefs = JSON.parse(localStorage.getItem('kula_graphs_max') || '{}'); } catch (e) { }
                     prefs[graphId] = {
                         mode: select.value,
-                        value: parseFloat(input.value) || (graphId === 'cpu_temp' ? 100 : 1000)
+                        value: parseFloat(input.value) || (graphId === 'network' ? 1000 : 100)
                     };
                     localStorage.setItem('kula_graphs_max', JSON.stringify(prefs));
                     dropdown.classList.add('hidden');

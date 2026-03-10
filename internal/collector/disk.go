@@ -299,3 +299,53 @@ func getDiskTemperature(devName string) (float64, []DiskTempSensor) {
 	}
 	return 0, nil
 }
+
+// DetectDiskTjMax returns the maximum critical temperature of any disk in Celsius, or 0 if undetected.
+func DetectDiskTjMax() float64 {
+	var maxCrit float64
+
+	matches, err := filepath.Glob(filepath.Join(sysPath, "class", "block", "*"))
+	if err != nil {
+		return 0
+	}
+
+	for _, match := range matches {
+		pathsToCheck := []string{
+			filepath.Join(match, "device", "hwmon"),
+			filepath.Join(match, "device", "device", "hwmon"),
+			filepath.Join(match, "device"),
+		}
+
+		for _, basePath := range pathsToCheck {
+			entries, err := os.ReadDir(basePath)
+			if err != nil {
+				continue
+			}
+
+			for _, entry := range entries {
+				if !strings.HasPrefix(entry.Name(), "hwmon") {
+					continue
+				}
+
+				hwmonDir := filepath.Join(basePath, entry.Name())
+				crits, _ := filepath.Glob(filepath.Join(hwmonDir, "temp*_crit"))
+
+				for _, crit := range crits {
+					data, err := os.ReadFile(crit)
+					if err == nil {
+						valStr := strings.TrimSpace(string(data))
+						tempMilliC := parseUint(valStr, 10, 64, "disk.temp_crit")
+						if tempMilliC > 0 {
+							val := float64(tempMilliC) / 1000.0
+							if val > maxCrit {
+								maxCrit = val
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
+	return maxCrit
+}
