@@ -125,6 +125,8 @@ func (c *Collector) collectDisks(elapsed float64) DiskStats {
 			dev.WriteBytesPS = float64(cur.writeSect-prev.writeSect) * 512.0 / elapsed
 		}
 
+		dev.Temperature = getDiskTemperature(name)
+
 		stats.Devices = append(stats.Devices, dev)
 	}
 
@@ -212,4 +214,56 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 		})
 	}
 	return result
+}
+
+// getDiskTemperature attempts to read temperature for a disk device.
+func getDiskTemperature(devName string) float64 {
+	// Common paths for disk hwmon:
+	// 1. /sys/class/block/<dev>/device/hwmon/hwmon*/temp1_input (drivetemp, nvme)
+	// 2. /sys/class/block/<dev>/device/device/hwmon/hwmon*/temp1_input (some NVMe)
+
+	pathsToCheck := []string{
+		filepath.Join(sysPath, "class", "block", devName, "device", "hwmon"),
+		filepath.Join(sysPath, "class", "block", devName, "device", "device", "hwmon"),
+	}
+
+	for _, basePath := range pathsToCheck {
+		entries, err := os.ReadDir(basePath)
+		if err != nil {
+			continue
+		}
+
+		for _, entry := range entries {
+			if !strings.HasPrefix(entry.Name(), "hwmon") {
+				continue
+			}
+
+			// Prefer temp1_input (often primary or composite temperature)
+			temp1File := filepath.Join(basePath, entry.Name(), "temp1_input")
+			data, err := os.ReadFile(temp1File)
+			if err == nil {
+				valStr := strings.TrimSpace(string(data))
+				tempMilliC := parseUint(valStr, 10, 64, "disk.temp")
+				if tempMilliC > 0 {
+					return round2(float64(tempMilliC) / 1000.0)
+				}
+			}
+
+			// Fallback to searching any temp*_input if temp1_input doesn't exist/can't read
+			tempFiles, err := filepath.Glob(filepath.Join(basePath, entry.Name(), "temp*_input"))
+			if err == nil && len(tempFiles) > 0 {
+				for _, tempFile := range tempFiles {
+					data, err := os.ReadFile(tempFile)
+					if err == nil {
+						valStr := strings.TrimSpace(string(data))
+						tempMilliC := parseUint(valStr, 10, 64, "disk.temp")
+						if tempMilliC > 0 {
+							return round2(float64(tempMilliC) / 1000.0)
+						}
+					}
+				}
+			}
+		}
+	}
+	return 0
 }

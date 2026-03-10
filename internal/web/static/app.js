@@ -342,23 +342,32 @@
             { label: 'Write B/s', borderColor: colors.orange, backgroundColor: colors.orangeAlpha, fill: true, data: [], yAxisID: 'y' },
             { label: 'Reads/s', borderColor: colors.cyan, data: [], fill: false, borderDash: [4, 2], yAxisID: 'y1' },
             { label: 'Writes/s', borderColor: colors.pink, data: [], fill: false, borderDash: [4, 2], yAxisID: 'y1' },
+            { label: 'Temp °C', borderColor: colors.red, data: [], fill: false, borderDash: [2, 2], yAxisID: 'y2', hidden: false },
         ], { ticks: { callback: v => formatBytesShort(v) + '/s' } }, {
             tooltip: {
                 callbacks: {
-                    label: ctx => ctx.dataset.yAxisID === 'y1'
-                        ? ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(0) + ' IOPS'
-                        : ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s'
+                    label: ctx => {
+                        if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(0) + ' IOPS';
+                        if (ctx.dataset.yAxisID === 'y2') return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1);
+                        return ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s';
+                    }
                 }
             }
         });
 
-        // Reconfigure disk IO chart for dual axes
+        // Reconfigure disk IO chart for dual/triple axes
         if (state.charts.diskio) {
             state.charts.diskio.options.scales.y1 = {
                 position: 'right',
                 beginAtZero: true,
                 grid: { display: false },
                 ticks: { callback: v => v.toFixed(0) + ' IO/s' },
+            };
+            state.charts.diskio.options.scales.y2 = {
+                position: 'right',
+                beginAtZero: true,
+                grid: { display: false },
+                ticks: { callback: v => v.toFixed(1) + ' °C' },
             };
             state.charts.diskio.update('none');
         }
@@ -579,13 +588,14 @@
 
         // Disk I/O (selected device)
         if (state.charts.diskio && s.disk?.devices) {
-            let rBps = 0, wBps = 0, rIops = 0, wIops = 0;
+            let rBps = 0, wBps = 0, rIops = 0, wIops = 0, temp = 0;
             const d = s.disk.devices.find(d => d.name === state.selectedDiskIo);
             if (d) {
                 rBps = d.read_bps || 0;
                 wBps = d.write_bps || 0;
                 rIops = d.reads_ps || 0;
                 wIops = d.writes_ps || 0;
+                temp = d.temp || 0;
             } else if (!state.selectedDiskIo && s.disk.devices.length > 0) {
                 s.disk.devices.forEach(d => {
                     rBps += d.read_bps || 0;
@@ -598,6 +608,9 @@
             state.charts.diskio.data.datasets[1].data.push(point(wBps));
             state.charts.diskio.data.datasets[2].data.push(point(rIops));
             state.charts.diskio.data.datasets[3].data.push(point(wIops));
+            if (state.charts.diskio.data.datasets[4]) {
+                state.charts.diskio.data.datasets[4].data.push(point(temp));
+            }
         }
 
         // Disk Space — single dataset for selected mount
@@ -1163,18 +1176,23 @@
             el('conn-subtitle', `estab:${s.net?.tcp?.curr_estab || 0} err:${errs}/s rst:${rsts}/s`);
         }
         if (s.disk?.devices) {
-            let r = 0, w = 0, rIops = 0, wIops = 0;
+            let r = 0, w = 0, rIops = 0, wIops = 0, temp = 0;
             const d = s.disk.devices.find(d => d.name === state.selectedDiskIo);
             if (d) {
                 r = d.read_bps || 0; w = d.write_bps || 0;
                 rIops = d.reads_ps || 0; wIops = d.writes_ps || 0;
+                temp = d.temp || 0;
             } else if (!state.selectedDiskIo) {
                 s.disk.devices.forEach(d => {
                     r += d.read_bps || 0; w += d.write_bps || 0;
                     rIops += d.reads_ps || 0; wIops += d.writes_ps || 0;
                 });
             }
-            el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
+            if (temp > 0) {
+                el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}  ${temp.toFixed(1)}°C`);
+            } else {
+                el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
+            }
         }
         if (s.disk?.filesystems) {
             let used = 0, total = 0;

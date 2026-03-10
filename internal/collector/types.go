@@ -114,6 +114,7 @@ type DiskDevice struct {
 	ReadBytesPS  float64 `json:"read_bps"`
 	WriteBytesPS float64 `json:"write_bps"`
 	Utilization  float64 `json:"util_pct"`
+	Temperature  float64 `json:"temp,omitempty"`
 }
 
 type FileSystemInfo struct {
