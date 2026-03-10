@@ -40,6 +40,7 @@
         theme: localStorage.getItem('kula_theme') || 'dark',
         diskSpaceMountNames: [], // Not used as datasets anymore, but kept for compatibility
         cpuTempSensorNames: [],
+        diskTempSensorNames: [],
         currentAggregation: localStorage.getItem('kula_aggregation') || 'avg',
         selectedNet: localStorage.getItem('kula_sel_net') || null,
         selectedDiskIo: localStorage.getItem('kula_sel_diskio') || null,
@@ -342,20 +343,17 @@
             { label: 'Write B/s', borderColor: colors.orange, backgroundColor: colors.orangeAlpha, fill: true, data: [], yAxisID: 'y' },
             { label: 'Reads/s', borderColor: colors.cyan, data: [], fill: false, borderDash: [4, 2], yAxisID: 'y1' },
             { label: 'Writes/s', borderColor: colors.pink, data: [], fill: false, borderDash: [4, 2], yAxisID: 'y1' },
-            { label: 'Temp °C', borderColor: colors.red, data: [], fill: false, borderDash: [2, 2], yAxisID: 'y2', hidden: false },
         ], { ticks: { callback: v => formatBytesShort(v) + '/s' } }, {
             tooltip: {
                 callbacks: {
-                    label: ctx => {
-                        if (ctx.dataset.yAxisID === 'y1') return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(0) + ' IOPS';
-                        if (ctx.dataset.yAxisID === 'y2') return ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(1);
-                        return ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s';
-                    }
+                    label: ctx => ctx.dataset.yAxisID === 'y1'
+                        ? ctx.dataset.label + ': ' + ctx.parsed.y.toFixed(0) + ' IOPS'
+                        : ctx.dataset.label + ': ' + formatBytesShort(Math.round(ctx.parsed.y)) + '/s'
                 }
             }
         });
 
-        // Reconfigure disk IO chart for dual/triple axes
+        // Reconfigure disk IO chart for dual axes
         if (state.charts.diskio) {
             state.charts.diskio.options.scales.y1 = {
                 position: 'right',
@@ -363,14 +361,17 @@
                 grid: { display: false },
                 ticks: { callback: v => v.toFixed(0) + ' IO/s' },
             };
-            state.charts.diskio.options.scales.y2 = {
-                position: 'right',
-                beginAtZero: true,
-                grid: { display: false },
-                ticks: { callback: v => v.toFixed(1) + ' °C' },
-            };
             state.charts.diskio.update('none');
         }
+
+        state.diskTempSensorNames = [];
+        let diskTempYConfig = { ticks: { callback: v => v.toFixed(1) + '°C' } };
+        let diskTempMax = getChartMaxBound('disk_temp');
+        if (diskTempMax !== undefined) diskTempYConfig.max = diskTempMax;
+
+        state.charts.disktemp = createTimeSeriesChart('chart-disk-temp', [
+            { label: 'Temperature', borderColor: colors.red, backgroundColor: colors.redAlpha, fill: true, data: [] },
+        ], diskTempYConfig);
 
 
 
@@ -588,14 +589,13 @@
 
         // Disk I/O (selected device)
         if (state.charts.diskio && s.disk?.devices) {
-            let rBps = 0, wBps = 0, rIops = 0, wIops = 0, temp = 0;
+            let rBps = 0, wBps = 0, rIops = 0, wIops = 0;
             const d = s.disk.devices.find(d => d.name === state.selectedDiskIo);
             if (d) {
                 rBps = d.read_bps || 0;
                 wBps = d.write_bps || 0;
                 rIops = d.reads_ps || 0;
                 wIops = d.writes_ps || 0;
-                temp = d.temp || 0;
             } else if (!state.selectedDiskIo && s.disk.devices.length > 0) {
                 s.disk.devices.forEach(d => {
                     rBps += d.read_bps || 0;
@@ -608,8 +608,56 @@
             state.charts.diskio.data.datasets[1].data.push(point(wBps));
             state.charts.diskio.data.datasets[2].data.push(point(rIops));
             state.charts.diskio.data.datasets[3].data.push(point(wIops));
-            if (state.charts.diskio.data.datasets[4]) {
-                state.charts.diskio.data.datasets[4].data.push(point(temp));
+        }
+
+        // Disk Temperature
+        const diskTempCard = document.getElementById('card-disk-temp');
+        if (state.charts.disktemp && s.disk?.devices) {
+            const d = s.disk.devices.find(d => d.name === state.selectedDiskIo);
+            const hasSensors = d && d.sensors && d.sensors.length > 0;
+            const hasTemp = d && d.temp > 0;
+
+            if (hasSensors || hasTemp) {
+                if (diskTempCard) diskTempCard.classList.remove('hidden');
+
+                if (hasSensors) {
+                    const incomingNames = d.sensors.map(sens => sens.name);
+                    if (incomingNames.join(',') !== state.diskTempSensorNames.join(',')) {
+                        state.diskTempSensorNames = incomingNames;
+                        const tempColorPairs = [
+                            [colors.red, colors.redAlpha],
+                            [colors.orange, colors.orangeAlpha],
+                            [colors.yellow, colors.yellowAlpha],
+                            [colors.pink, colors.pinkAlpha],
+                            [colors.purple, colors.purpleAlpha],
+                            [colors.cyan, colors.cyanAlpha],
+                        ];
+                        state.charts.disktemp.data.datasets = incomingNames.map((name, i) => ({
+                            label: name,
+                            borderColor: tempColorPairs[i % tempColorPairs.length][0],
+                            backgroundColor: tempColorPairs[i % tempColorPairs.length][1],
+                            fill: i === 0,
+                            data: [],
+                            pointHitRadius: 5,
+                        }));
+                    }
+
+                    d.sensors.forEach((sens, i) => {
+                        if (i < state.charts.disktemp.data.datasets.length) {
+                            state.charts.disktemp.data.datasets[i].data.push(point(sens.value));
+                        }
+                    });
+                } else {
+                    if (state.charts.disktemp.data.datasets.length !== 1 || state.charts.disktemp.data.datasets[0].label !== 'Temperature') {
+                        state.diskTempSensorNames = [];
+                        state.charts.disktemp.data.datasets = [
+                            { label: 'Temperature', borderColor: colors.red, backgroundColor: colors.redAlpha, fill: true, data: [] },
+                        ];
+                    }
+                    state.charts.disktemp.data.datasets[0].data.push(point(d.temp));
+                }
+            } else {
+                if (diskTempCard) diskTempCard.classList.add('hidden');
             }
         }
 
@@ -1182,16 +1230,20 @@
                 r = d.read_bps || 0; w = d.write_bps || 0;
                 rIops = d.reads_ps || 0; wIops = d.writes_ps || 0;
                 temp = d.temp || 0;
+                el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
+
+                if (temp > 0) {
+                    el('disktemp-subtitle', `${temp.toFixed(1)}°C`);
+                } else {
+                    el('disktemp-subtitle', '');
+                }
             } else if (!state.selectedDiskIo) {
                 s.disk.devices.forEach(d => {
                     r += d.read_bps || 0; w += d.write_bps || 0;
                     rIops += d.reads_ps || 0; wIops += d.writes_ps || 0;
                 });
-            }
-            if (temp > 0) {
-                el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}  ${temp.toFixed(1)}°C`);
-            } else {
                 el('diskio-subtitle', `R:${formatBytesShort(r)}/s W:${formatBytesShort(w)}/s  rIOPS:${rIops.toFixed(0)} wIOPS:${wIops.toFixed(0)}`);
+                el('disktemp-subtitle', '');
             }
         }
         if (s.disk?.filesystems) {

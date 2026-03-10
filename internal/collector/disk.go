@@ -125,7 +125,7 @@ func (c *Collector) collectDisks(elapsed float64) DiskStats {
 			dev.WriteBytesPS = float64(cur.writeSect-prev.writeSect) * 512.0 / elapsed
 		}
 
-		dev.Temperature = getDiskTemperature(name)
+		dev.Temperature, dev.Sensors = getDiskTemperature(name)
 
 		stats.Devices = append(stats.Devices, dev)
 	}
@@ -217,15 +217,15 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 }
 
 // getDiskTemperature attempts to read temperature for a disk device.
-func getDiskTemperature(devName string) float64 {
-	// Common paths for disk hwmon:
-	// 1. /sys/class/block/<dev>/device/hwmon/hwmon*/temp1_input (drivetemp, nvme)
-	// 2. /sys/class/block/<dev>/device/device/hwmon/hwmon*/temp1_input (some NVMe)
-
+func getDiskTemperature(devName string) (float64, []DiskTempSensor) {
 	pathsToCheck := []string{
 		filepath.Join(sysPath, "class", "block", devName, "device", "hwmon"),
 		filepath.Join(sysPath, "class", "block", devName, "device", "device", "hwmon"),
+		filepath.Join(sysPath, "class", "block", devName, "device"), // fallback for nvme direct hwmon0
 	}
+
+	var primaryTemp float64
+	var sensors []DiskTempSensor
 
 	for _, basePath := range pathsToCheck {
 		entries, err := os.ReadDir(basePath)
@@ -238,32 +238,64 @@ func getDiskTemperature(devName string) float64 {
 				continue
 			}
 
-			// Prefer temp1_input (often primary or composite temperature)
-			temp1File := filepath.Join(basePath, entry.Name(), "temp1_input")
-			data, err := os.ReadFile(temp1File)
-			if err == nil {
-				valStr := strings.TrimSpace(string(data))
-				tempMilliC := parseUint(valStr, 10, 64, "disk.temp")
-				if tempMilliC > 0 {
-					return round2(float64(tempMilliC) / 1000.0)
-				}
+			hwmonDir := filepath.Join(basePath, entry.Name())
+
+			// Find all temp*_input
+			inputs, _ := filepath.Glob(filepath.Join(hwmonDir, "temp*_input"))
+			if len(inputs) == 0 {
+				continue
 			}
 
-			// Fallback to searching any temp*_input if temp1_input doesn't exist/can't read
-			tempFiles, err := filepath.Glob(filepath.Join(basePath, entry.Name(), "temp*_input"))
-			if err == nil && len(tempFiles) > 0 {
-				for _, tempFile := range tempFiles {
-					data, err := os.ReadFile(tempFile)
-					if err == nil {
-						valStr := strings.TrimSpace(string(data))
-						tempMilliC := parseUint(valStr, 10, 64, "disk.temp")
-						if tempMilliC > 0 {
-							return round2(float64(tempMilliC) / 1000.0)
-						}
+			for _, input := range inputs {
+				data, err := os.ReadFile(input)
+				if err != nil {
+					continue
+				}
+
+				valStr := strings.TrimSpace(string(data))
+				tempMilliC := parseUint(valStr, 10, 64, "disk.temp")
+				if tempMilliC == 0 && valStr != "0" {
+					continue
+				}
+
+				tempC := round2(float64(tempMilliC) / 1000.0)
+
+				// Fetch label if exists
+				labelFile := strings.TrimSuffix(input, "_input") + "_label"
+				labelName := "Temperature"
+				if labelData, err := os.ReadFile(labelFile); err == nil {
+					lbl := strings.TrimSpace(string(labelData))
+					if lbl != "" {
+						labelName = lbl
+					}
+				} else {
+					// e.g. "temp1"
+					base := filepath.Base(input)
+					labelName = strings.TrimSuffix(base, "_input")
+				}
+
+				sensors = append(sensors, DiskTempSensor{
+					Name:  labelName,
+					Value: tempC,
+				})
+			}
+
+			if len(sensors) > 0 {
+				// We found sensors in this hwmon dir.
+				// Find primary temp
+				for _, s := range sensors {
+					sNameLow := strings.ToLower(s.Name)
+					if sNameLow == "composite" || sNameLow == "temp1" {
+						primaryTemp = s.Value
+						break
 					}
 				}
+				if primaryTemp == 0 {
+					primaryTemp = sensors[0].Value
+				}
+				return primaryTemp, sensors
 			}
 		}
 	}
-	return 0
+	return 0, nil
 }
