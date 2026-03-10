@@ -2022,7 +2022,7 @@
             actions.style.gap = '0.35rem';
 
             // Clean up any old injected buttons or dropdowns
-            header.querySelectorAll('.btn-icon, .alert-dropdown').forEach(el => el.remove());
+            header.querySelectorAll('.btn-icon, .alert-dropdown, .chart-settings-dropdown').forEach(el => el.remove());
 
             // Check if this graph needs a settings button
             let graphId = null;
@@ -2043,14 +2043,7 @@
                 sBtn.onmouseleave = () => sBtn.style.opacity = '0.5';
 
                 const dropdown = document.createElement('div');
-                dropdown.className = 'alert-dropdown hidden';
-                dropdown.style.top = '2rem';
-                dropdown.style.right = '0';
-                dropdown.style.padding = '1rem';
-                dropdown.style.width = '200px';
-                dropdown.style.zIndex = '100';
-                dropdown.style.cursor = 'default';
-                dropdown.style.textAlign = 'left';
+                dropdown.className = 'chart-settings-dropdown hidden';
 
                 const title = document.createElement('div');
                 title.style.marginBottom = '0.5rem';
@@ -2132,8 +2125,8 @@
                     input.value = uiVal;
                     input.style.display = uiMode === 'off' ? 'none' : 'block';
 
-                    document.querySelectorAll('.alert-dropdown').forEach(d => {
-                        if (d !== dropdown && !d.id.includes('alert') && !d.id.includes('info')) {
+                    document.querySelectorAll('.chart-settings-dropdown').forEach(d => {
+                        if (d !== dropdown) {
                             d.classList.add('hidden');
                         }
                     });
@@ -2475,6 +2468,10 @@
             if (state.aggDropdownOpen && !e.target.closest('#btn-agg-menu') && !e.target.closest('#agg-presets-list')) {
                 state.aggDropdownOpen = false;
                 document.getElementById('agg-presets-list').classList.remove('open');
+            }
+            // Close chart settings if clicking outside
+            if (!e.target.closest('.btn-icon') && !e.target.closest('.chart-settings-dropdown')) {
+                document.querySelectorAll('.chart-settings-dropdown').forEach(d => d.classList.add('hidden'));
             }
         });
 

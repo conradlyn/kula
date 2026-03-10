@@ -413,6 +413,24 @@ body {
     animation: fadeInUp 0.2s ease;
 }
 
+.chart-settings-dropdown {
+    position: absolute;
+    top: calc(100% + 5px);
+    right: 0;
+    width: 220px;
+    background: var(--bg-secondary);
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    box-shadow: var(--shadow-lg);
+    z-index: 1000;
+    padding: 1rem;
+    cursor: default;
+    text-align: left;
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    animation: fadeInUp 0.15s ease-out;
+}
+
 .alert-dropdown-header {
     padding: 0.6rem 1rem;
     font-weight: 600;
