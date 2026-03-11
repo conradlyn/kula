@@ -2,6 +2,7 @@ package collector
 
 import (
 	"kula-szpiegula/internal/config"
+	"log"
 	"sync"
 	"time"
 )
@@ -33,6 +34,13 @@ func New(cfg config.GlobalConfig, collCfg config.CollectionConfig) *Collector {
 		collCfg:  collCfg,
 		prevNet:  make(map[string]netRaw),
 		prevDisk: make(map[string]diskRaw),
+	}
+}
+
+// debugf logs a formatted message only when web.logging.level = "perf" is set.
+func (c *Collector) debugf(format string, args ...any) {
+	if c.collCfg.DebugLog {
+		log.Printf(format, args...)
 	}
 }
 

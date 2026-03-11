@@ -55,3 +55,54 @@ func TestCollectFileSystemsDocker(t *testing.T) {
 		t.Errorf("expected overlay at /, got %s at %s", fs[0].FSType, fs[0].MountPoint)
 	}
 }
+func TestParseDiskStatsConfig(t *testing.T) {
+	procPath = "testdata/proc_with_partitions"
+
+	// 1. Default (no config) - should skip sda1, sda2
+	c1 := New(config.GlobalConfig{}, config.CollectionConfig{})
+	raw1 := c1.parseDiskStats()
+	if len(raw1) != 1 {
+		t.Errorf("expected 1 disk (sda), got %d: %v", len(raw1), raw1)
+	}
+	if _, ok := raw1["sda"]; !ok {
+		t.Errorf("missing sda")
+	}
+
+	// 2. Explicit config - should allow sda1 even if it's a partition
+	c2 := New(config.GlobalConfig{}, config.CollectionConfig{
+		Devices: []string{"sda", "sda1"},
+	})
+	raw2 := c2.parseDiskStats()
+	if len(raw2) != 2 {
+		t.Errorf("expected 2 disks (sda, sda1), got %d: %v", len(raw2), raw2)
+	}
+	if _, ok := raw2["sda1"]; !ok {
+		t.Errorf("missing sda1 with explicit config")
+	}
+}
+
+func TestIsPartition(t *testing.T) {
+	tests := []struct {
+		name string
+		want bool
+	}{
+		{"sda", false},
+		{"sda1", true},
+		{"sdb", false},
+		{"sdb10", true},
+		{"nvme0n1", false},
+		{"nvme0n1p1", true},
+		{"mmcblk0", false},
+		{"mmcblk0p2", true},
+		{"vda", false},
+		{"vda1", true},
+		{"xvda", false},
+		{"xvda1", true},
+	}
+
+	for _, tt := range tests {
+		if got := isPartition(tt.name); got != tt.want {
+			t.Errorf("isPartition(%q) = %v, want %v", tt.name, got, tt.want)
+		}
+	}
+}

@@ -7,6 +7,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
+## [0.8.2] - TBA
+
+### Added
+
+- Debug logging for disk and network collector auto-discovery
+
+### Changed
+
+- go: upgraded golang.org/x/crypto v0.48.0 => v0.49.0
+- go: upgraded golang.org/x/text v0.34.0 => v0.35.0
+
+### Fixed
+
+- Disk and network collector auto-discovery fixes
+
 ## [0.8.1] - 2026-03-11
 
 ### Added

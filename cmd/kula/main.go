@@ -114,6 +114,7 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 	cfg.Web.OS = osName
 	cfg.Web.Kernel = kernelVersion
 	cfg.Web.Arch = cpuArch
+	cfg.Collection.DebugLog = cfg.Web.Logging.Enabled && cfg.Web.Logging.Level == "perf"
 	coll := collector.New(cfg.Global, cfg.Collection)
 
 	store, err := storage.NewStore(cfg.Storage)

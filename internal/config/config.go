@@ -29,6 +29,9 @@ type CollectionConfig struct {
 	Devices     []string      `yaml:"devices"`
 	MountPoints []string      `yaml:"mountpoints"`
 	Interfaces  []string      `yaml:"interfaces"`
+	// DebugLog enables verbose debug logging for device/interface/filesystem
+	// discovery. Controlled by web.logging.level = "perf". Not exposed in YAML.
+	DebugLog bool `yaml:"-"`
 }
 
 type StorageConfig struct {

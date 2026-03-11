@@ -4,7 +4,6 @@ import (
 	"bufio"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -23,6 +22,7 @@ func (c *Collector) parseDiskStats() map[string]diskRaw {
 	}
 	defer func() { _ = f.Close() }()
 
+	explicitFilter := len(c.collCfg.Devices) > 0
 	result := make(map[string]diskRaw)
 	scanner := bufio.NewScanner(f)
 	for scanner.Scan() {
@@ -32,23 +32,33 @@ func (c *Collector) parseDiskStats() map[string]diskRaw {
 		}
 		name := fields[2]
 
-		// Skip virtual, logical, and optical devices to prevent IO double-counting
-		// dm- (device-mapper/LVM/LUKS), md (software RAID), loop, sr (optical), ram, zram
-		if strings.HasPrefix(name, "dm-") || strings.HasPrefix(name, "md") ||
-			strings.HasPrefix(name, "loop") || strings.HasPrefix(name, "sr") ||
-			strings.HasPrefix(name, "ram") || strings.HasPrefix(name, "zram") ||
-			strings.HasPrefix(name, "fd") {
+		// Skip virtual, logical, and optical devices to prevent IO double-counting:
+		// dm- (device-mapper/LVM/LUKS), md (software RAID), loop, sr (optical), ram, zram, fd (floppy)
+		var virtualReason string
+		switch {
+		case strings.HasPrefix(name, "dm-"):
+			virtualReason = "device-mapper (LVM/LUKS)"
+		case strings.HasPrefix(name, "md"):
+			virtualReason = "software RAID"
+		case strings.HasPrefix(name, "loop"):
+			virtualReason = "loop device"
+		case strings.HasPrefix(name, "sr"):
+			virtualReason = "optical drive"
+		case strings.HasPrefix(name, "ram"):
+			virtualReason = "RAM disk"
+		case strings.HasPrefix(name, "zram"):
+			virtualReason = "zram (compressed RAM)"
+		case strings.HasPrefix(name, "fd"):
+			virtualReason = "floppy disk"
+		}
+		if virtualReason != "" {
+			c.debugf(" disk: skipping %q — virtual device (%s)", name, virtualReason)
 			continue
 		}
 
-		// Skip partitions — only keep whole physical devices
-		// Heuristic: skip if name ends with a digit and is a partition (sda1, nvme0n1p1)
-		if isPartition(name) {
-			continue
-		}
-
-		// Apply configuration filter if set
-		if len(c.collCfg.Devices) > 0 {
+		// When an explicit device list is configured, it takes full priority —
+		// partitions (e.g. sda1, mmcblk0p2) are allowed if explicitly listed.
+		if explicitFilter {
 			allowed := false
 			for _, allowedDev := range c.collCfg.Devices {
 				if allowedDev == name {
@@ -57,8 +67,14 @@ func (c *Collector) parseDiskStats() map[string]diskRaw {
 				}
 			}
 			if !allowed {
+				c.debugf(" disk: skipping %q — not in configured devices list", name)
 				continue
 			}
+		} else if isPartition(name) {
+			// Auto-discovery mode: skip partitions, only keep whole physical devices
+			// to avoid double-counting IO across parent disk + its partitions.
+			c.debugf(" disk: skipping %q — partition (auto-discovery mode; add to 'devices' config to include)", name)
+			continue
 		}
 
 		d := diskRaw{}
@@ -67,42 +83,48 @@ func (c *Collector) parseDiskStats() map[string]diskRaw {
 		d.writes = parseUint(fields[7], 10, 64, "disk.writes")
 		d.writeSect = parseUint(fields[9], 10, 64, "disk.writeSect")
 		result[name] = d
+		c.debugf(" disk: monitoring device %q", name)
+	}
+	if len(result) == 0 {
+		c.debugf(" disk: no devices selected for monitoring")
+	} else {
+		c.debugf(" disk: monitoring %d device(s)", len(result))
 	}
 	return result
 }
 
+// isPartition returns true if name looks like a disk partition rather than a whole device.
+// Conventions by driver family:
+//
+//	sda, sdb, ... sdaa, ...      — whole SCSI/SATA/USB disk
+//	sda1, sdb2, sdaa1            — partition (ends with digit)
+//	nvme0n1                      — whole NVMe namespace
+//	nvme0n1p1                    — NVMe partition (contains 'p' after 'n')
+//	mmcblk0                      — whole eMMC/SD card
+//	mmcblk0p1, mmcblk0p2         — eMMC/SD partition (contains 'p')
+//	vda, xvda, hda               — whole virtio/Xen/IDE disk
+//	vda1, xvda1, hda1            — partition (ends with digit)
 func isPartition(name string) bool {
-	// sd[a-z][0-9] pattern
-	if strings.HasPrefix(name, "sd") && len(name) > 3 {
+	// SCSI/SATA/USB: sda → whole disk; sda1, sdb12, sdaa1 → partition
+	if strings.HasPrefix(name, "sd") && len(name) > 2 {
 		lastChar := name[len(name)-1]
 		if lastChar >= '0' && lastChar <= '9' {
 			return true
 		}
 	}
-	// nvme0n1p1 pattern
-	if strings.Contains(name, "p") && strings.HasPrefix(name, "nvme") {
-		parts := strings.Split(name, "p")
-		if len(parts) > 2 {
-			return true
-		}
-		// Check if after last 'p' is a digit
-		lastPart := parts[len(parts)-1]
-		if len(lastPart) > 0 {
-			if _, err := strconv.Atoi(lastPart); err == nil && strings.Contains(name, "n") {
-				// This is a partition if the full pattern is nvme\d+n\d+p\d+
-				idx := strings.LastIndex(name, "p")
-				before := name[:idx]
-				if strings.Contains(before, "n") {
-					return true
-				}
-			}
-		}
+	// NVMe: nvme0n1 → whole namespace; nvme0n1p1 → partition
+	// Only names with 'p' are partitions (nvme0n1 has no 'p').
+	if strings.HasPrefix(name, "nvme") && strings.Contains(name, "p") {
+		return true
 	}
-	// vda1, xvda1 etc.
+	// eMMC/SD: mmcblk0 → whole device; mmcblk0p2 → partition
+	if strings.HasPrefix(name, "mmcblk") && strings.Contains(name, "p") {
+		return true
+	}
+	// Virtio (vda1), Xen (xvda1), old IDE (hda1): ends with a digit
 	for _, prefix := range []string{"vd", "xvd", "hd"} {
-		if strings.HasPrefix(name, prefix) && len(name) > len(prefix)+1 {
-			lastChar := name[len(name)-1]
-			if lastChar >= '0' && lastChar <= '9' {
+		if strings.HasPrefix(name, prefix) && len(name) > len(prefix) {
+			if name[len(name)-1] >= '0' && name[len(name)-1] <= '9' {
 				return true
 			}
 		}
@@ -136,6 +158,23 @@ func (c *Collector) collectDisks(elapsed float64) DiskStats {
 	return stats
 }
 
+// realFSTypes is the set of filesystem types considered "real" for monitoring purposes.
+// tmpfs, sysfs, proc, devtmpfs, cgroup, etc. are intentionally excluded.
+var realFSTypes = map[string]bool{
+	// Linux native
+	"ext2": true, "ext3": true, "ext4": true,
+	"xfs": true, "btrfs": true, "zfs": true,
+	"f2fs": true, "bcachefs": true,
+	// FAT / exFAT / NTFS (boot partitions, external drives, SD cards)
+	"vfat": true, "exfat": true, "ntfs": true, "ntfs3": true,
+	// FUSE-based
+	"fuseblk": true,
+	// Network filesystems
+	"nfs": true, "nfs4": true, "cifs": true, "smb3": true,
+	// Container overlay
+	"overlay": true,
+}
+
 func (c *Collector) collectFileSystems() []FileSystemInfo {
 	f, err := os.Open(filepath.Join(procPath, "mounts"))
 	if err != nil {
@@ -143,7 +182,10 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 	}
 	defer func() { _ = f.Close() }()
 
+	explicitFilter := len(c.collCfg.MountPoints) > 0
 	var result []FileSystemInfo
+	// Deduplicate by mount point — the same mount point can appear multiple times
+	// in /proc/mounts due to bind mounts re-exporting the same location.
 	seen := make(map[string]bool)
 	scanner := bufio.NewScanner(f)
 
@@ -158,29 +200,31 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 
 		// Skip floppy disks
 		if strings.HasPrefix(device, "/dev/fd") {
+			c.debugf(" fs: skipping %q at %q — floppy disk", device, mount)
 			continue
 		}
 
-		// Only real filesystems
-		switch fstype {
-		case "ext2", "ext3", "ext4", "xfs", "btrfs", "zfs", "f2fs",
-			"fuseblk", "nfs", "nfs4", "cifs", "overlay":
-		default:
+		// Only accepted filesystem types
+		if !realFSTypes[fstype] {
+			c.debugf(" fs: skipping %q at %q — filesystem type %q not monitored", device, mount, fstype)
 			continue
 		}
 
-		// Avoid docker specific mounts like /etc/resolv.conf, /etc/hostname, /etc/hosts
+		// Avoid container-injected bind mounts like /etc/resolv.conf, /etc/hostname, /etc/hosts
 		if strings.HasPrefix(mount, "/etc/") {
+			c.debugf(" fs: skipping %q at %q — /etc/ bind mount (container artifact)", device, mount)
 			continue
 		}
 
-		// Skip duplicates
-		if seen[device] {
+		// Deduplicate: same mount point appearing twice is always a no-op.
+		// Different mount points on the same device (e.g. bind mounts) are allowed.
+		if seen[mount] {
+			c.debugf(" fs: skipping %q at %q — duplicate mount point", device, mount)
 			continue
 		}
 
 		// Apply configuration filter if set
-		if len(c.collCfg.MountPoints) > 0 {
+		if explicitFilter {
 			allowed := false
 			for _, allowedMount := range c.collCfg.MountPoints {
 				if allowedMount == mount {
@@ -189,14 +233,16 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 				}
 			}
 			if !allowed {
+				c.debugf(" fs: skipping %q at %q — not in configured mountpoints list", device, mount)
 				continue
 			}
 		}
 
-		seen[device] = true
+		seen[mount] = true
 
 		var stat syscall.Statfs_t
 		if err := syscall.Statfs(mount, &stat); err != nil {
+			c.debugf(" fs: skipping %q at %q — statfs error: %v", device, mount, err)
 			continue
 		}
 
@@ -209,6 +255,7 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 			usedPct = round2(float64(used) / float64(total) * 100.0)
 		}
 
+		c.debugf(" fs: monitoring %q at %q (type=%s)", device, mount, fstype)
 		result = append(result, FileSystemInfo{
 			Device:     device,
 			MountPoint: mount,
@@ -218,6 +265,11 @@ func (c *Collector) collectFileSystems() []FileSystemInfo {
 			Available:  free,
 			UsedPct:    usedPct,
 		})
+	}
+	if len(result) == 0 {
+		c.debugf(" fs: no filesystems selected for monitoring")
+	} else {
+		c.debugf(" fs: monitoring %d filesystem(s)", len(result))
 	}
 	return result
 }

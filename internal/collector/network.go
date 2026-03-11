@@ -22,6 +22,7 @@ func (c *Collector) parseNetDev() map[string]netRaw {
 	}
 	defer func() { _ = f.Close() }()
 
+	explicitFilter := len(c.collCfg.Interfaces) > 0
 	result := make(map[string]netRaw)
 	scanner := bufio.NewScanner(f)
 	lineNum := 0
@@ -36,11 +37,9 @@ func (c *Collector) parseNetDev() map[string]netRaw {
 			continue
 		}
 		name := strings.TrimSpace(parts[0])
-		if strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "br-") {
-			continue
-		}
 
-		if len(c.collCfg.Interfaces) > 0 {
+		if explicitFilter {
+			// Explicit list: the user gets exactly what they asked for, no filtering.
 			allowed := false
 			for _, allowedIface := range c.collCfg.Interfaces {
 				if allowedIface == name {
@@ -49,6 +48,32 @@ func (c *Collector) parseNetDev() map[string]netRaw {
 				}
 			}
 			if !allowed {
+				c.debugf(" net: skipping %q — not in configured interfaces list", name)
+				continue
+			}
+		} else {
+			// Auto-discovery mode: skip loopback and virtual/container interfaces.
+			var skipReason string
+			switch {
+			case name == "lo":
+				skipReason = "loopback"
+			case strings.HasPrefix(name, "veth"):
+				skipReason = "veth (container virtual interface)"
+			case strings.HasPrefix(name, "docker"):
+				skipReason = "docker bridge"
+			case strings.HasPrefix(name, "br-"):
+				skipReason = "Linux bridge"
+			case strings.HasPrefix(name, "virbr"):
+				skipReason = "libvirt bridge"
+			case strings.HasPrefix(name, "vnet"):
+				skipReason = "KVM/QEMU virtual NIC"
+			case strings.HasPrefix(name, "tap"):
+				skipReason = "TAP interface (VM/VPN)"
+			case strings.HasPrefix(name, "tun"):
+				skipReason = "TUN interface (VPN)"
+			}
+			if skipReason != "" {
+				c.debugf(" net: skipping %q — %s", name, skipReason)
 				continue
 			}
 		}
@@ -67,6 +92,12 @@ func (c *Collector) parseNetDev() map[string]netRaw {
 		n.txErrs = parseUint(fields[10], 10, 64, "network.txErrs")
 		n.txDrop = parseUint(fields[11], 10, 64, "network.txDrop")
 		result[name] = n
+		c.debugf(" net: monitoring interface %q", name)
+	}
+	if len(result) == 0 {
+		c.debugf(" net: no interfaces selected for monitoring")
+	} else {
+		c.debugf(" net: monitoring %d interface(s)", len(result))
 	}
 	return result
 }
@@ -222,7 +253,15 @@ func DetectLinkSpeed() float64 {
 	if err == nil {
 		for _, entry := range entries {
 			name := entry.Name()
-			if name == "lo" || strings.HasPrefix(name, "veth") || strings.HasPrefix(name, "docker") || strings.HasPrefix(name, "br-") {
+			// Skip loopback and virtual/container interfaces — same set as parseNetDev auto-discovery
+			if name == "lo" ||
+				strings.HasPrefix(name, "veth") ||
+				strings.HasPrefix(name, "docker") ||
+				strings.HasPrefix(name, "br-") ||
+				strings.HasPrefix(name, "virbr") ||
+				strings.HasPrefix(name, "vnet") ||
+				strings.HasPrefix(name, "tap") ||
+				strings.HasPrefix(name, "tun") {
 				continue
 			}
 
