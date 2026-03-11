@@ -16,16 +16,17 @@ var (
 
 // Collector orchestrates all metric sub-collectors.
 type Collector struct {
-	mu       sync.RWMutex
-	cfg      config.GlobalConfig
-	collCfg  config.CollectionConfig
-	latest   *Sample
-	prevCPU  []cpuRaw
-	prevNet  map[string]netRaw
-	prevDisk map[string]diskRaw
-	prevSelf selfRaw
-	prevTCP  tcpRaw
-	prevTime time.Time
+	mu        sync.RWMutex
+	cfg       config.GlobalConfig
+	collCfg   config.CollectionConfig
+	latest    *Sample
+	prevCPU   []cpuRaw
+	prevNet   map[string]netRaw
+	prevDisk  map[string]diskRaw
+	prevSelf  selfRaw
+	prevTCP   tcpRaw
+	prevTime  time.Time
+	debugDone bool // set after the first Collect(); suppresses repeated debug logs
 }
 
 func New(cfg config.GlobalConfig, collCfg config.CollectionConfig) *Collector {
@@ -37,9 +38,10 @@ func New(cfg config.GlobalConfig, collCfg config.CollectionConfig) *Collector {
 	}
 }
 
-// debugf logs a formatted message only when web.logging.level = "debug" is set.
+// debugf logs a formatted message only when web.logging.level = "debug" is set
+// AND only during the first collection cycle. Subsequent calls are no-ops.
 func (c *Collector) debugf(format string, args ...any) {
-	if c.collCfg.DebugLog {
+	if c.collCfg.DebugLog && !c.debugDone {
 		log.Printf(format, args...)
 	}
 }
@@ -76,6 +78,11 @@ func (c *Collector) Collect() *Sample {
 	c.mu.Lock()
 	c.latest = s
 	c.mu.Unlock()
+
+	// Suppress debug logs after the first collection cycle — devices and
+	// interfaces don't change at runtime, so repeating them every second
+	// would flood the log.
+	c.debugDone = true
 
 	return s
 }
