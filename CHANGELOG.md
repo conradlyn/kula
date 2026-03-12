@@ -9,9 +9,17 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
 ## [0.8.3] - TBA
 
+### Changed
+
+- Change data dir default chmod to 750
+
 ### Fixed
 
 - Fix filesystem mount detection in containers by reading both /proc/{1,self}/mounts (#5)
+
+### Removed
+
+- External fonts dependency removed
 
 ## [0.8.2] - 2026-03-12
 

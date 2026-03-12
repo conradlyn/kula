@@ -139,11 +139,12 @@ func securityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
+		// Nonce for CloudFlare's JS challenge
 		nonce := base64.StdEncoding.EncodeToString(b)
 
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; style-src 'self' fonts.googleapis.com; font-src fonts.gstatic.com; script-src 'self' 'nonce-%s'; connect-src 'self' ws: wss:;", nonce))
+		w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; connect-src 'self' ws: wss:;", nonce))
 		next.ServeHTTP(w, r)
 	})
 }
