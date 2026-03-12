@@ -1,0 +1,196 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Kula — Lightweight Linux Server Monitoring</title>
+    <meta name="description"
+        content="Zero-dependency, self-contained Linux server monitoring. Single binary, real-time dashboard, built-in storage engine. Just deploy and go.">
+    <!-- Content Security Policy -->
+    <meta http-equiv="Content-Security-Policy"
+        content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src https://fonts.gstatic.com; img-src 'self' https://raw.githubusercontent.com https://*.githubusercontent.com https://github.com https://*.amazonaws.com data:; connect-src 'self' https://api.github.com;">
+    <link rel="icon" href="https://raw.githubusercontent.com/c0m4r/kula/main/internal/web/static/kula.svg">
+    <link rel="stylesheet" href="style.css">
+</head>
+
+<body>
+
+    <!-- Navigation -->
+    <nav class="nav" id="nav">
+        <a href="#" class="nav-brand">
+            <img src="https://raw.githubusercontent.com/c0m4r/kula/main/internal/web/static/kula.svg" alt="Kula">
+            <span>KULA</span>
+        </a>
+        <div class="nav-links">
+            <a href="#features">Features</a>
+            <a href="#preview">Preview</a>
+            <a href="#metrics">Metrics</a>
+            <a href="https://github.com/c0m4r/kula?tab=readme-ov-file#-installation">Install</a>
+            <a href="https://github.com/c0m4r/kula" class="github-link" id="github-link">
+                <img src="github.svg" alt="" class="github-icon">
+                <span>GitHub</span>
+                <span class="stars-badge github-stars-count"></span>
+            </a>
+            <button class="btn-theme-toggle" id="btn-theme" title="Toggle light/dark mode"
+                aria-label="Toggle theme">🌓</button>
+        </div>
+    </nav>
+
+    <!-- Main Content -->
+    <main>
+        <!-- Hero -->
+        <section class="hero" id="hero">
+            <img src="https://raw.githubusercontent.com/c0m4r/kula/main/internal/web/static/kula.svg" alt="Kula"
+                class="hero-logo">
+            <h1>K U L A</h1>
+            <p class="hero-tagline">Lightweight, self-contained Linux® server monitoring.<br>Real-time dashboard with
+                built-in storage engine.</p>
+            <p class="hero-sub">Zero dependencies. No external databases. Single binary. Just deploy and go.</p>
+            <div class="hero-buttons">
+                <a href="https://demo.kula.ovh/" class="btn btn-hero"><span role="img" aria-label="eye">👀</span> Live
+                    Demo</a>
+                <a href="https://github.com/c0m4r/kula" class="btn btn-outline">
+                    <img src="github.svg" alt="" class="github-icon"> GitHub
+                    <span class="stars-badge github-stars-count"></span>
+                </a>
+                <a href="https://hub.docker.com/r/c0m4r/kula" class="btn btn-docker"><span role="img"
+                        aria-label="whale">🐋</span> Docker Hub</a>
+            </div>
+        </section>
+
+        <!-- Features -->
+        <section class="features fade-up" id="features">
+            <div class="section-label">Why Kula</div>
+            <h2 class="section-heading">Everything in One Binary</h2>
+            <div class="features-grid">
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="lightning">⚡</span></div>
+                    <h3>Zero Dependencies</h3>
+                    <p>No databases, no agents, no runtime. Upload one binary to your server and start monitoring in
+                        seconds.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="chart">📊</span></div>
+                    <h3>Real-Time Dashboard</h3>
+                    <p>WebSocket-powered live charts with Chart.js, SVG gauges, interactive zoom, focus mode, and
+                        light/dark
+                        themes.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="disk">💾</span></div>
+                    <h3>Built-In Storage</h3>
+                    <p>Tiered ring-buffer engine with predictable disk usage. 1s, 1m, and 5m resolution tiers — no
+                        cleanup
+                        needed.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="lock">🔒</span></div>
+                    <h3>Privacy First</h3>
+                    <p>Works on closed networks. No calls to external services. No cloud APIs. No tracking.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="gift">🎁</span></div>
+                    <h3>Open Source</h3>
+                    <p>Kula is free to use and open source. Licensed under AGPLv3. Check the code and contribute on
+                        GitHub.
+                    </p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="penguin">🐧</span></div>
+                    <h3>Pure Linux</h3>
+                    <p>Reads directly from /proc and /sys every second. Supports amd64, arm64, and riscv64
+                        architectures.
+                    </p>
+                </div>
+            </div>
+        </section>
+
+        <!-- Dashboard Preview -->
+        <section class="preview fade-up" id="preview">
+            <div class="section-label">Dashboard</div>
+            <h2 class="section-heading">Real-Time Monitoring at a Glance</h2>
+            <div class="preview-frame">
+                <img src="https://github.com/user-attachments/assets/d50e5653-0e84-4374-9ded-4d8e9f8eedd2"
+                    alt="Kula Dashboard — Dark Mode" loading="lazy" class="preview-dark" id="preview-dark">
+                <img src="https://github.com/user-attachments/assets/771b3e95-8713-44d2-8309-cd9e1f722a7e"
+                    alt="Kula Dashboard — Light Mode" loading="lazy" class="preview-light hidden" id="preview-light">
+            </div>
+        </section>
+
+        <!-- Metrics -->
+        <section class="metrics fade-up" id="metrics">
+            <div class="section-label">What's Collected</div>
+            <h2 class="section-heading">Comprehensive System Metrics</h2>
+            <table class="metrics-table">
+                <thead>
+                    <tr>
+                        <th>Metric</th>
+                        <th>Details</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <tr>
+                        <td>CPU</td>
+                        <td>Total usage (user, system, iowait, irq, softirq, steal) + core count</td>
+                    </tr>
+                    <tr>
+                        <td>Load</td>
+                        <td>1 / 5 / 15 min averages, running & total tasks</td>
+                    </tr>
+                    <tr>
+                        <td>Memory</td>
+                        <td>Total, free, available, used, buffers, cached, shmem</td>
+                    </tr>
+                    <tr>
+                        <td>Swap</td>
+                        <td>Total, free, used</td>
+                    </tr>
+                    <tr>
+                        <td>Network</td>
+                        <td>Per-interface throughput (Mbps), packets/s, errors, drops; TCP stats; socket counts</td>
+                    </tr>
+                    <tr>
+                        <td>Disks</td>
+                        <td>Per-device I/O (read/write bytes/s, IOPS); filesystem usage</td>
+                    </tr>
+                    <tr>
+                        <td>System</td>
+                        <td>Uptime, entropy, clock sync, hostname, logged-in user count</td>
+                    </tr>
+                    <tr>
+                        <td>Processes</td>
+                        <td>Running, sleeping, blocked, zombie counts</td>
+                    </tr>
+                    <tr>
+                        <td>Self</td>
+                        <td>Kula's own CPU%, RSS memory, open file descriptors</td>
+                    </tr>
+                    <tr>
+                        <td>Thermal</td>
+                        <td>CPU and Disk temperatures</td>
+                    </tr>
+                </tbody>
+            </table>
+        </section>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+        <div class="footer-links">
+            <a href="https://github.com/c0m4r/kula">GitHub</a>
+            <a href="https://hub.docker.com/r/c0m4r/kula">Docker Hub</a>
+            <a href="https://demo.kula.ovh/">Live Demo</a>
+            <a href="https://github.com/c0m4r/kula?tab=readme-ov-file#-installation">Install</a>
+            <a href="https://github.com/c0m4r/kula/releases">Releases</a>
+        </div>
+        <div class="footer-copy">
+            Licensed under <a href="https://www.gnu.org/licenses/agpl-3.0">AGPLv3</a> ·
+            Linux® is the registered trademark of Linus Torvalds
+        </div>
+    </footer>
+
+    <script src="landing.js"></script>
+</body>
+
+</html>
