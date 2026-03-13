@@ -7,23 +7,46 @@ import (
 	"kula-szpiegula/internal/collector"
 )
 
-const histLen = 120 // number of samples to keep (~2 min at 1s)
+const (
+	// histLen defines the number of samples to keep in rolling history buffers.
+	// At 1-second refresh rate, this provides ~2 minutes of historical data
+	// for sparkline graphs and trend analysis.
+	histLen = 120
+)
 
-// metricRing is a fixed-capacity rolling buffer for sparkline history.
+// metricRing is a fixed-capacity circular buffer for sparkline history.
 type metricRing struct {
 	buf []float64
 	cap int
+	pos int
+	len int
 }
 
 func newRing() metricRing {
-	return metricRing{buf: make([]float64, 0, histLen), cap: histLen}
+	return metricRing{buf: make([]float64, histLen), cap: histLen}
 }
 
 func (r *metricRing) push(v float64) {
-	if len(r.buf) >= r.cap {
-		r.buf = r.buf[1:]
+	r.buf[r.pos] = v
+	r.pos = (r.pos + 1) % r.cap
+	if r.len < r.cap {
+		r.len++
 	}
-	r.buf = append(r.buf, v)
+}
+
+// getAll returns all values in chronological order (oldest to newest)
+func (r *metricRing) getAll() []float64 {
+	if r.len == 0 {
+		return nil
+	}
+	if r.len < r.cap {
+		return r.buf[:r.len]
+	}
+	// Return buffer starting from oldest element
+	result := make([]float64, r.len)
+	copy(result, r.buf[r.pos:])
+	copy(result[r.cap-r.pos:], r.buf[:r.pos])
+	return result
 }
 
 // tabID identifies the active dashboard tab.
@@ -140,8 +163,11 @@ func (m model) Init() tea.Cmd { return doTick(m.refreshRate) }
 func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	switch msg := msg.(type) {
 	case tea.WindowSizeMsg:
-		m.width = msg.Width
-		m.height = msg.Height
+		// Validate window size to prevent overflow
+		if msg.Width > 0 && msg.Height > 0 {
+			m.width = msg.Width
+			m.height = msg.Height
+		}
 	case tickMsg:
 		m.now = time.Time(msg)
 		m.sample = m.coll.Collect()
@@ -156,17 +182,29 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "shift+tab", "left", "h":
 			m.activeTab = (m.activeTab - 1 + numTabs) % numTabs
 		case "1":
-			m.activeTab = tabOverview
+			if tabOverview < numTabs {
+				m.activeTab = tabOverview
+			}
 		case "2":
-			m.activeTab = tabCPU
+			if tabCPU < numTabs {
+				m.activeTab = tabCPU
+			}
 		case "3":
-			m.activeTab = tabMemory
+			if tabMemory < numTabs {
+				m.activeTab = tabMemory
+			}
 		case "4":
-			m.activeTab = tabNetwork
+			if tabNetwork < numTabs {
+				m.activeTab = tabNetwork
+			}
 		case "5":
-			m.activeTab = tabDisk
+			if tabDisk < numTabs {
+				m.activeTab = tabDisk
+			}
 		case "6":
-			m.activeTab = tabProcesses
+			if tabProcesses < numTabs {
+				m.activeTab = tabProcesses
+			}
 		}
 	}
 	return m, nil

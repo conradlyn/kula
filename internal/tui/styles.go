@@ -1,6 +1,114 @@
 package tui
 
-import "github.com/charmbracelet/lipgloss"
+import (
+	"sync"
+
+	"github.com/charmbracelet/lipgloss"
+)
+
+// styleCache provides thread-safe caching for expensive style calculations.
+type styleCache struct {
+	mu     sync.RWMutex
+	bars   map[float64]lipgloss.Style
+	status map[float64]lipgloss.Style
+	load   map[float64]lipgloss.Style
+}
+
+var cache = &styleCache{
+	bars:   make(map[float64]lipgloss.Style),
+	status: make(map[float64]lipgloss.Style),
+	load:   make(map[float64]lipgloss.Style),
+}
+
+// getBarStyle returns cached bar style or creates and caches a new one.
+func (c *styleCache) getBarStyle(pct float64) lipgloss.Style {
+	c.mu.RLock()
+	if style, exists := c.bars[pct]; exists {
+		c.mu.RUnlock()
+		return style
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	// Double-check after acquiring write lock
+	if style, exists := c.bars[pct]; exists {
+		return style
+	}
+
+	var style lipgloss.Style
+	if pct >= 85 {
+		style = sBarCrit
+	} else if pct >= 65 {
+		style = sBarWarn
+	} else {
+		style = sBarGood
+	}
+	
+	c.bars[pct] = style
+	return style
+}
+
+// getStatusStyle returns cached status style or creates and caches a new one.
+func (c *styleCache) getStatusStyle(pct float64) lipgloss.Style {
+	c.mu.RLock()
+	if style, exists := c.status[pct]; exists {
+		c.mu.RUnlock()
+		return style
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	// Double-check after acquiring write lock
+	if style, exists := c.status[pct]; exists {
+		return style
+	}
+
+	var style lipgloss.Style
+	if pct >= 85 {
+		style = sCrit
+	} else if pct >= 65 {
+		style = sWarn
+	} else {
+		style = sGood
+	}
+	
+	c.status[pct] = style
+	return style
+}
+
+// getLoadStyle returns cached load style or creates and caches a new one.
+func (c *styleCache) getLoadStyle(load float64) lipgloss.Style {
+	c.mu.RLock()
+	if style, exists := c.load[load]; exists {
+		c.mu.RUnlock()
+		return style
+	}
+	c.mu.RUnlock()
+
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	
+	// Double-check after acquiring write lock
+	if style, exists := c.load[load]; exists {
+		return style
+	}
+
+	var style lipgloss.Style
+	if load >= 4 {
+		style = sCrit
+	} else if load >= 2 {
+		style = sWarn
+	} else {
+		style = sGood
+	}
+	
+	c.load[load] = style
+	return style
+}
 
 // Palette — dark purple/slate theme inspired by Charmbracelet's aesthetic.
 var (

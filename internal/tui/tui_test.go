@@ -124,11 +124,12 @@ func TestMetricRingPush(t *testing.T) {
 	r.push(2.0)
 	r.push(3.0)
 
-	if len(r.buf) != 3 {
-		t.Fatalf("expected 3 items, got %d", len(r.buf))
+	if r.len != 3 {
+		t.Fatalf("expected len 3, got %d", r.len)
 	}
+	// Check the actual values in the buffer (not getAll since it's not full yet)
 	if r.buf[0] != 1.0 || r.buf[2] != 3.0 {
-		t.Errorf("unexpected values: %v", r.buf)
+		t.Errorf("unexpected values: %v", r.buf[:r.len])
 	}
 }
 
@@ -137,17 +138,17 @@ func TestMetricRingCap(t *testing.T) {
 	for i := 0; i < histLen+10; i++ {
 		r.push(float64(i))
 	}
-	if len(r.buf) != histLen {
-		t.Fatalf("expected cap %d, got %d", histLen, len(r.buf))
+	if r.len != histLen {
+		t.Fatalf("expected len %d, got %d", histLen, r.len)
 	}
-	// The first histLen+10 pushes discarded the first 10 values,
-	// so r.buf[0] should be 10.
-	if r.buf[0] != float64(10) {
-		t.Errorf("expected oldest value 10, got %f", r.buf[0])
+	// With circular buffer, after histLen+10 pushes, the oldest value should be 10
+	// and the newest should be histLen+9
+	all := r.getAll()
+	if all[0] != float64(10) {
+		t.Errorf("expected oldest value 10, got %f", all[0])
 	}
-	// And the newest should be histLen+10-1.
-	if r.buf[histLen-1] != float64(histLen+9) {
-		t.Errorf("expected newest value %d, got %f", histLen+9, r.buf[histLen-1])
+	if all[histLen-1] != float64(histLen+9) {
+		t.Errorf("expected newest value %d, got %f", histLen+9, all[histLen-1])
 	}
 }
 
@@ -682,8 +683,8 @@ func TestPushSample_PopulatesHistory(t *testing.T) {
 
 	m.pushSample(s)
 
-	if len(m.histCPU.buf) != 1 {
-		t.Fatalf("expected 1 CPU history entry, got %d", len(m.histCPU.buf))
+	if m.histCPU.len != 1 {
+		t.Fatalf("expected 1 CPU history entry, got %d", m.histCPU.len)
 	}
 	if m.histCPU.buf[0] != 42.0 {
 		t.Errorf("expected CPU history 42.0, got %f", m.histCPU.buf[0])
@@ -699,8 +700,14 @@ func TestPushSample_AggregatesNetwork(t *testing.T) {
 	}
 	m.pushSample(s)
 
+	if m.histNetRx.len != 1 {
+		t.Fatalf("expected 1 NetRx history entry, got %d", m.histNetRx.len)
+	}
 	if m.histNetRx.buf[0] != 13.0 {
 		t.Errorf("NetRx aggregation: expected 13.0, got %f", m.histNetRx.buf[0])
+	}
+	if m.histNetTx.len != 1 {
+		t.Fatalf("expected 1 NetTx history entry, got %d", m.histNetTx.len)
 	}
 	if m.histNetTx.buf[0] != 6.0 {
 		t.Errorf("NetTx aggregation: expected 6.0, got %f", m.histNetTx.buf[0])
@@ -716,6 +723,9 @@ func TestPushSample_AveragesDiskUtil(t *testing.T) {
 	}
 	m.pushSample(s)
 
+	if m.histDisk.len != 1 {
+		t.Fatalf("expected 1 Disk history entry, got %d", m.histDisk.len)
+	}
 	if m.histDisk.buf[0] != 50.0 {
 		t.Errorf("Disk avg util: expected 50.0, got %f", m.histDisk.buf[0])
 	}
