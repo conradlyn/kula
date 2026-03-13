@@ -317,6 +317,14 @@ docker compose -f addons/docker/docker-compose.yml up -d
 
 ---
 
+## 🔒 Privacy
+
+Privacy is a core pillar, not an afterthought.
+
+Kula is built for privacy-conscious infrastructure. It is a completely self-contained binary that requires no cloud connection and no third-party APIs. Designed to function perfectly in air-gapped networks, Kula never sends metadata to external servers, never serves advertisements, and requires no user registration. Your monitoring starts and ends on your infrastructure, exactly where it should be.
+
+---
+
 ## 📖 License
 
 [GNU Affero General Public License v3.0](LICENSE)
