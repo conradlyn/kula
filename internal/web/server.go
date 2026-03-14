@@ -396,6 +396,14 @@ func (s *Server) handleHistory(w http.ResponseWriter, r *http.Request) {
 		_, _ = fmt.Sscanf(pointsStr, "%d", &points)
 	}
 
+	// Cap points to prevent resource exhaustion
+	if points > 5000 {
+		points = 5000
+	}
+	if points < 1 {
+		points = 1
+	}
+
 	startLoad := time.Now()
 	result, err := s.store.QueryRangeWithMeta(from, to, points)
 	if err != nil {
@@ -630,8 +638,10 @@ func (s *Server) calculateSRI(path string) string {
 func getClientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
 		if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
-			// Take only the first (leftmost) IP from the chain
-			return strings.TrimSpace(strings.SplitN(xff, ",", 2)[0])
+			parts := strings.Split(xff, ",")
+			// The rightmost IP is the one appended by our trusted proxy.
+			// Leftmost IPs are client-controlled and can be spoofed.
+			return strings.TrimSpace(parts[len(parts)-1])
 		}
 	}
 

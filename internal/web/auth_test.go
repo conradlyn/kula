@@ -320,7 +320,7 @@ func TestGetClientIP(t *testing.T) {
 			remoteAddr: "1.2.3.4:1234",
 			xff:        "10.0.0.1, 10.0.0.2, 1.2.3.4",
 			trustProxy: true,
-			want:       "10.0.0.1",
+			want:       "1.2.3.4",
 		},
 		{
 			name:       "Invalid RemoteAddr format",
