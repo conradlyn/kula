@@ -47,28 +47,50 @@ document.addEventListener('DOMContentLoaded', () => {
     // ---- Fetch GitHub Stars ----
     async function fetchStars() {
         const badges = document.querySelectorAll('.github-stars-count');
+        const DEFAULT_STARS = 436;
+        const CACHE_KEY = 'kula-stars';
+        const TIMESTAMP_KEY = 'kula-stars-time';
+        const ONE_HOUR = 60 * 60 * 1000;
+
+        const cachedStars = localStorage.getItem(CACHE_KEY);
+        const cachedTime = localStorage.getItem(TIMESTAMP_KEY);
+        const now = Date.now();
+
+        const updateUI = (count) => {
+            const starsText = count >= 1000 ? (count / 1000).toFixed(1) + 'k' : count;
+            badges.forEach(badge => {
+                badge.textContent = '⭐ ' + starsText;
+                badge.classList.remove('hidden');
+            });
+        };
+
+        // 1. Check if cached and valid (less than 1 hour old)
+        if (cachedStars && cachedTime && (now - parseInt(cachedTime)) < ONE_HOUR) {
+            updateUI(parseInt(cachedStars));
+            return;
+        }
+
+        // 2. Try to fetch from API
         try {
             const resp = await fetch('https://api.github.com/repos/c0m4r/kula');
-            if (resp.status === 403) {
-                console.warn('GitHub API rate limit exceeded. Stars counter hidden.');
-                badges.forEach(badge => badge.classList.add('hidden'));
-                return;
-            }
             if (resp.ok) {
                 const data = await resp.json();
                 const stars = data.stargazers_count;
                 if (stars !== undefined) {
-                    const starsText = stars >= 1000 ? (stars / 1000).toFixed(1) + 'k' : stars;
-                    badges.forEach(badge => {
-                        badge.textContent = '⭐ ' + starsText;
-                        badge.classList.remove('hidden');
-                    });
+                    localStorage.setItem(CACHE_KEY, stars);
+                    localStorage.setItem(TIMESTAMP_KEY, now.toString());
+                    updateUI(stars);
+                    return;
                 }
+            } else if (resp.status === 403) {
+                console.warn('GitHub API rate limit exceeded. Using default stars.');
             }
         } catch (e) {
             console.error('Failed to fetch stars:', e);
-            badges.forEach(badge => badge.classList.add('hidden'));
         }
+
+        // 3. Fallback to default value if API fails or rate limited
+        updateUI(DEFAULT_STARS);
     }
     fetchStars();
 
