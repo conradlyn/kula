@@ -15,6 +15,7 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 - SRI hashes and CSP nonce injection for javascript files
 - Security headers hardening
 - WebSocket message size guard in the frontend
+- Fix WebSocket double-unregistration bug using sync.Once
 
 ## [0.9.0] - 2026-03-14
 

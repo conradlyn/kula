@@ -64,9 +64,16 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 		sendCh: make(chan []byte, 64),
 	}
 
+	var unregOnce sync.Once
+	unregister := func() {
+		unregOnce.Do(func() {
+			s.hub.unregCh <- client
+		})
+	}
+
 	s.hub.regCh <- client
 	defer func() {
-		s.hub.unregCh <- client
+		unregister()
 		_ = conn.Close()
 	}()
 
@@ -96,7 +103,7 @@ func (s *Server) handleWebSocket(w http.ResponseWriter, r *http.Request) {
 				if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
 					log.Printf("WebSocket read unexpected error: %v", err)
 				}
-				s.hub.unregCh <- client
+				unregister()
 				return
 			}
 
