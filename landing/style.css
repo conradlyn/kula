@@ -1019,6 +1019,16 @@ body.light-mode .command-box pre {
         font-size: 0.95rem;
     }
 
+    .command-box .copy-btn {
+        position: sticky;
+        transform: translateY(0);
+    }
+
+    .command-box code {
+        text-wrap: unset;
+    }
+
+
     @media (max-width: 480px) {
 
         .nav-brand,
