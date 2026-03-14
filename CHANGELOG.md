@@ -12,6 +12,8 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 ### Security
 
 - Add Origin/Referer validation for state-changing HTTP requests to provide additional CSRF protection
+- SRI hashes and CSP nonce injection for javascript files
+- Security headers hardening
 
 ## [0.9.0] - 2026-03-14
 

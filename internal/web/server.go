@@ -5,10 +5,12 @@ import (
 	"compress/gzip"
 	"context"
 	"crypto/rand"
+	"crypto/sha512"
 	"embed"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
+	"html/template"
 	"io"
 	"io/fs"
 	"log"
@@ -35,6 +37,8 @@ type Server struct {
 	auth      *AuthManager
 	hub       *wsHub
 	httpSrv   *http.Server
+	templates *template.Template
+	sriHashes map[string]string
 }
 
 func NewServer(cfg config.WebConfig, global config.GlobalConfig, c *collector.Collector, s *storage.Store, storageDir string) *Server {
@@ -45,7 +49,10 @@ func NewServer(cfg config.WebConfig, global config.GlobalConfig, c *collector.Co
 		store:     s,
 		auth:      NewAuthManager(cfg.Auth, storageDir, cfg.TrustProxy),
 		hub:       newWSHub(),
+		sriHashes: make(map[string]string),
 	}
+	srv.initializeTemplates()
+	srv.calculateSRIs()
 	return srv
 }
 
@@ -144,17 +151,26 @@ func jsonError(w http.ResponseWriter, msg string, code int) {
 	_, _ = w.Write(b)
 }
 
-func securityMiddleware(next http.Handler) http.Handler {
+type contextKey string
+
+const nonceKey contextKey = "csp_nonce"
+
+func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		b := make([]byte, 16)
 		_, _ = rand.Read(b)
 		// Nonce for CloudFlare's JS challenge
 		nonce := base64.StdEncoding.EncodeToString(b)
 
+		// Inject nonce into context
+		ctx := context.WithValue(r.Context(), nonceKey, nonce)
+
 		w.Header().Set("X-Content-Type-Options", "nosniff")
 		w.Header().Set("X-Frame-Options", "DENY")
-		w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; connect-src 'self' ws: wss:;", nonce))
-		next.ServeHTTP(w, r)
+		w.Header().Set("Content-Security-Policy", fmt.Sprintf("default-src 'self'; script-src 'self' 'nonce-%s'; frame-ancestors 'none';", nonce))
+		w.Header().Set("Referrer-Policy", "strict-origin-when-cross-origin")
+		w.Header().Set("Permissions-Policy", "geolocation=(), microphone=(), camera=()")
+		next.ServeHTTP(w, r.WithContext(ctx))
 	})
 }
 
@@ -180,22 +196,42 @@ func (s *Server) Start() error {
 	// Wrap apiMux with logging and CSRF protection
 	loggedApiMux := s.auth.CSRFMiddleware(loggingMiddleware(s.cfg, apiMux))
 
-	// WebSocket
-	apiMux.HandleFunc("/ws", s.handleWebSocket)
+	// Register /ws separately and explicitly through auth, CSRF and logging
+	wsHandler := s.auth.AuthMiddleware(
+		s.auth.CSRFMiddleware(
+			loggingMiddleware(s.cfg, http.HandlerFunc(s.handleWebSocket)),
+		),
+	)
 
 	// Apply auth to API routes (except login and auth status)
 	mux.Handle("/api/login", loggedApiMux)
 	mux.Handle("/api/logout", loggedApiMux)
 	mux.Handle("/api/auth/status", loggedApiMux)
 	mux.Handle("/api/", s.auth.AuthMiddleware(loggedApiMux))
-	mux.Handle("/ws", s.auth.AuthMiddleware(loggedApiMux))
+	mux.Handle("/ws", wsHandler)
 
-	// Static files
+	// Templated HTML files
+	mux.HandleFunc("/", s.handleIndex)
+	mux.HandleFunc("/index.html", s.handleIndex)
+	mux.HandleFunc("/game.html", s.handleGame)
+
+	// Static files fallback
 	staticContent, err := fs.Sub(staticFS, "static")
 	if err != nil {
 		return fmt.Errorf("static fs: %w", err)
 	}
-	mux.Handle("/", http.FileServer(http.FS(staticContent)))
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.FS(staticContent))))
+
+	// For other static assets in root
+	fileServer := http.FileServer(http.FS(staticContent))
+	mux.HandleFunc("/chart.umd.min.js", fileServer.ServeHTTP)
+	mux.HandleFunc("/chartjs-adapter-date-fns.bundle.min.js", fileServer.ServeHTTP)
+	mux.HandleFunc("/chartjs-plugin-zoom.min.js", fileServer.ServeHTTP)
+	mux.HandleFunc("/style.css", fileServer.ServeHTTP)
+	mux.HandleFunc("/game.css", fileServer.ServeHTTP)
+	mux.HandleFunc("/game.js", fileServer.ServeHTTP)
+	mux.HandleFunc("/app.js", fileServer.ServeHTTP)
+	mux.HandleFunc("/kula.svg", fileServer.ServeHTTP)
 
 	go s.hub.run()
 	go func() {
@@ -206,7 +242,7 @@ func (s *Server) Start() error {
 		}
 	}()
 
-	var handler = securityMiddleware(mux)
+	var handler = s.securityMiddleware(mux)
 	if s.cfg.EnableCompression {
 		handler = gzipMiddleware(handler)
 	}
@@ -461,7 +497,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 	})
 
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"token": token}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]string{"status": "logged in"}); err != nil {
 		log.Printf("JSON encode error: %v", err)
 	}
 }
@@ -562,6 +598,29 @@ func (h *wsHub) broadcast(data []byte) {
 	}
 }
 
+func (s *Server) initializeTemplates() {
+	var err error
+	s.templates, err = template.ParseFS(staticFS, "static/*.html")
+	if err != nil {
+		log.Fatalf("failed to parse templates: %v", err)
+	}
+}
+
+func (s *Server) calculateSRIs() {
+	s.sriHashes["app.js"] = s.calculateSRI("static/app.js")
+	s.sriHashes["game.js"] = s.calculateSRI("static/game.js")
+}
+
+func (s *Server) calculateSRI(path string) string {
+	data, err := staticFS.ReadFile(path)
+	if err != nil {
+		log.Printf("Warning: failed to read %s for SRI: %v", path, err)
+		return ""
+	}
+	sum := sha512.Sum384(data)
+	return "sha384-" + base64.StdEncoding.EncodeToString(sum[:])
+}
+
 // getClientIP extracts the real client IP, considering proxies and stripping ephemeral ports.
 func getClientIP(r *http.Request, trustProxy bool) string {
 	if trustProxy {
@@ -576,4 +635,39 @@ func getClientIP(r *http.Request, trustProxy bool) string {
 		return r.RemoteAddr // fallback if it doesn't have a port for some reason
 	}
 	return host
+}
+func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
+	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
+		// Fallback to static files for other paths
+		staticContent, _ := fs.Sub(staticFS, "static")
+		http.FileServer(http.FS(staticContent)).ServeHTTP(w, r)
+		return
+	}
+	s.renderTemplate(w, r, "index.html", "app.js")
+}
+
+func (s *Server) handleGame(w http.ResponseWriter, r *http.Request) {
+	s.renderTemplate(w, r, "game.html", "game.js")
+}
+
+func (s *Server) renderTemplate(w http.ResponseWriter, r *http.Request, templateName, sriKey string) {
+	nonce, ok := r.Context().Value(nonceKey).(string)
+	if !ok {
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+		return
+	}
+
+	data := struct {
+		Nonce string
+		SRI   string
+	}{
+		Nonce: nonce,
+		SRI:   s.sriHashes[sriKey],
+	}
+
+	w.Header().Set("Content-Type", "text/html; charset=utf-8")
+	if err := s.templates.ExecuteTemplate(w, templateName, data); err != nil {
+		log.Printf("Template execution error: %v", err)
+		http.Error(w, "internal server error", http.StatusInternalServerError)
+	}
 }

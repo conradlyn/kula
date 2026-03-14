@@ -7,9 +7,9 @@
     <title>K U L A</title>
     <link rel="icon" href="kula.svg">
     <meta name="description" content="Lightweight, self-contained Linux® server monitoring tool">
-    <script src="chart.umd.min.js"></script>
-    <script src="chartjs-adapter-date-fns.bundle.min.js"></script>
-    <script src="chartjs-plugin-zoom.min.js"></script>
+    <script src="chart.umd.min.js" nonce="{{.Nonce}}"></script>
+    <script src="chartjs-adapter-date-fns.bundle.min.js" nonce="{{.Nonce}}"></script>
+    <script src="chartjs-plugin-zoom.min.js" nonce="{{.Nonce}}"></script>
     <link rel="stylesheet" href="style.css">
 </head>
 
@@ -324,7 +324,7 @@
         </footer>
     </div>
 
-    <script src="app.js"></script>
+    <script src="app.js" nonce="{{.Nonce}}" integrity="{{.SRI}}" crossorigin="anonymous"></script>
 </body>
 
 </html>
