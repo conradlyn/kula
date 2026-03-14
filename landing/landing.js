@@ -279,11 +279,7 @@ document.addEventListener('DOMContentLoaded', () => {
                                         child.removeAttribute('href');
                                     }
                                 } catch {
-                                    // Relative URL - allow it (starts with # or /)
-                                    // if it looks like a protocol bypass attempt, strip it
-                                    if (href.trim().toLowerCase().startsWith('javascript:') || href.trim().toLowerCase().startsWith('data:')) {
-                                        child.removeAttribute('href');
-                                    }
+                                        child.removeAttribute('href'); // malformed URL — strip it
                                 }
                             }
                             // Enforce security attributes for target="_blank"
