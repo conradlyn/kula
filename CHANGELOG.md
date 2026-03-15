@@ -14,6 +14,10 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 - GPU monitoring
 - New env var: KULA_LOGLEVEL for log level override
 
+### Changed
+
+- Tune and optimize argon2: 64 => 32MB, time 1 => 3
+
 ## [0.9.2] - 2026-03-15
 
 ### Fixed
