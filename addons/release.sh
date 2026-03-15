@@ -26,6 +26,9 @@ for f in kula-linux-* ; do
     cp -r ../addons/bash-completion kula/
     cp -r ../addons/init kula/
     cp -r ../addons/man kula/
+    cd kula
+    ln -s . addons
+    cd -
     g="$(echo "$f" | sed 's/-linux//g;')"
     tar -czf "${g}.tar.gz" kula
     rm -rf kula
