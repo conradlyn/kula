@@ -41,6 +41,8 @@ stores them in a built-in tiered ring-buffer storage engine, and serves them thr
 | **Self** | Kula's own CPU%, RSS memory, open file descriptors |
 | **Thermal** | CPU, GPU and Disk temperatures |
 
+Note: Monitoring NVIDIA GPUs might require additional setup. Check [GPU monitoring](https://github.com/c0m4r/kula/wiki/GPU-monitoring).
+
 ---
 
 ## 🪩 How It Works
