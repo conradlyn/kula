@@ -6,7 +6,9 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
@@ -87,6 +89,15 @@ func OpenTier(path string, maxSize int64) (*Tier, error) {
 			_ = f.Close()
 			return nil, err
 		}
+	}
+
+	if t.codecVer < codecVersion2 && t.count > 0 {
+		fmt.Printf("Storage migration: legacy JSON detected in %s, starting conversion to binary v2...\n", path)
+		if err := t.migrateToBinary(); err != nil {
+			_ = t.file.Close()
+			return nil, fmt.Errorf("migration failed for %s: %w", path, err)
+		}
+		fmt.Printf("Storage migration: %s converted to binary v2 successfully.\n", path)
 	}
 
 	return t, nil
@@ -499,6 +510,156 @@ func (t *Tier) readTimestampAt(dataOffset int64) (time.Time, error) {
 		}
 		return time.Unix(0, int64(binary.LittleEndian.Uint64(buf[4:12]))), nil
 	}
+}
+
+// migrateToBinary converts a legacy (v1) tier file to binary (v2) in-place.
+// It reads all records in chronological order and rewrites them to a new v2 file.
+func (t *Tier) migrateToBinary() error {
+	// 1. Pre-check: Disk space.
+	// We need enough space for a full copy of the tier file.
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(filepath.Dir(t.path), &stat); err != nil {
+		return fmt.Errorf("statfs failed: %w", err)
+	}
+	available := int64(stat.Bavail) * int64(stat.Bsize)
+	required := headerSize + t.maxData
+	if available < required {
+		return fmt.Errorf("insufficient disk space for migration: need %d MB, have %d MB", required/1e6, available/1e6)
+	}
+
+	tmpPath := t.path + ".migration"
+	// Ensure cleanup if we fail
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	// Open original for reading (already open in t.file) and tmp for writing.
+	tmpFile, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tmpFile.Close() }()
+
+	// Initialize tmp tier structure to use its Write logic.
+	tmpTier := &Tier{
+		file:     tmpFile,
+		path:     tmpPath,
+		maxData:  t.maxData,
+		codecVer: codecVersion2,
+	}
+	if err := tmpTier.writeHeader(); err != nil {
+		return err
+	}
+
+	// Read all records from the current tier in chronological order.
+	type segment struct{ start, size int64 }
+	var segments []segment
+	if t.wrapped {
+		segments = []segment{
+			{t.writeOff, t.maxData - t.writeOff},
+			{0, t.writeOff},
+		}
+	} else {
+		segments = []segment{{0, t.writeOff}}
+	}
+
+	processed := 0
+	for _, seg := range segments {
+		bytesRead := int64(0)
+		sr := io.NewSectionReader(t.file, headerSize+seg.start, seg.size)
+		br := bufio.NewReaderSize(sr, 1024*1024)
+
+		for bytesRead < seg.size {
+			if seg.size-bytesRead < 4 {
+				break
+			}
+			lenBuf := make([]byte, 4)
+			if _, err := io.ReadFull(br, lenBuf); err != nil {
+				break
+			}
+			dataLen := binary.LittleEndian.Uint32(lenBuf)
+			if dataLen == 0 || int64(dataLen) > t.maxData {
+				break
+			}
+			recordLen := int64(4 + dataLen)
+			if bytesRead+recordLen > seg.size {
+				break
+			}
+
+			data := make([]byte, dataLen)
+			if _, err := io.ReadFull(br, data); err != nil {
+				break
+			}
+
+			// Decode record (handles JSON/binary automatically)
+			sample, err := t.readRecord(data)
+			if err != nil {
+				// Skip corrupted records during migration to keep as much as possible.
+				bytesRead += recordLen
+				continue
+			}
+
+			// Write to new binary format
+			if err := tmpTier.Write(sample); err != nil {
+				return fmt.Errorf("writing migrated record: %w", err)
+			}
+			processed++
+			if processed%1000 == 0 {
+				fmt.Printf("  ...migrated %d records in %s\n", processed, filepath.Base(t.path))
+			}
+			bytesRead += recordLen
+		}
+	}
+
+	fmt.Printf("  Migration complete: %d records processed for %s\n", processed, filepath.Base(t.path))
+
+	// Finalize tmp file
+	if err := tmpTier.writeHeader(); err != nil {
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return err
+	}
+	_ = tmpFile.Close()
+
+	// Atomic replacement:
+	// 1. Rename tmp to original (this replaces the file on disk)
+	if err := os.Rename(tmpPath, t.path); err != nil {
+		return fmt.Errorf("renaming migrated file: %w", err)
+	}
+
+	// 2. Open the NEW file FIRST before closing the old one to avoid nil state
+	newFile, err := os.OpenFile(t.path, os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("opening migrated file: %w", err)
+	}
+
+	// 3. Swap file handles and close old
+	oldFile := t.file
+	t.file = newFile
+	if oldFile != nil {
+		_ = oldFile.Close()
+	}
+
+	// 4. RESET STALE STATE before reading the new header
+	// This prevents the "wrapped" state leak bug.
+	t.wrapped = false
+	t.count = 0
+	t.writeOff = 0
+	t.oldestTS = time.Time{}
+	t.newestTS = time.Time{}
+
+	// 5. Load new metadata
+	if err := t.readHeader(); err != nil {
+		return fmt.Errorf("reading migrated header: %w", err)
+	}
+
+	// 6. Verification: Ensure we can read the newest record
+	if t.count > 0 {
+		if _, err := t.ReadLatest(1); err != nil {
+			return fmt.Errorf("migration verification failed for %s: %w", t.path, err)
+		}
+	}
+
+	return nil
 }
 
 // OldestTimestamp returns the oldest sample timestamp in this tier.
