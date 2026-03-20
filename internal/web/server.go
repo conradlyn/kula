@@ -181,6 +181,9 @@ func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) Start() error {
+	if !s.cfg.Enabled {
+		return nil
+	}
 	if err := s.auth.LoadSessions(); err != nil {
 		log.Printf("Warning: failed to load sessions: %v", err)
 	}
@@ -209,12 +212,32 @@ func (s *Server) Start() error {
 		),
 	)
 
-	// Apply auth to API routes (except login and auth status)
-	mux.Handle("/api/login", loggedApiMux)
-	mux.Handle("/api/logout", loggedApiMux)
-	mux.Handle("/api/auth/status", loggedApiMux)
-	mux.Handle("/api/", s.auth.AuthMiddleware(loggedApiMux))
-	mux.Handle("/ws", wsHandler)
+	if s.cfg.UI {
+		// Apply auth to API routes (except login and auth status)
+		mux.Handle("/api/login", loggedApiMux)
+		mux.Handle("/api/logout", loggedApiMux)
+		mux.Handle("/api/auth/status", loggedApiMux)
+		mux.Handle("/api/", s.auth.AuthMiddleware(loggedApiMux))
+		mux.Handle("/ws", wsHandler)
+
+		// Templated HTML files
+		mux.HandleFunc("/", s.handleIndex)
+		mux.HandleFunc("/index.html", s.handleIndex)
+		mux.HandleFunc("/game.html", s.handleGame)
+
+		// Static assets handler
+		mux.HandleFunc("/js/", s.handleStatic)
+		mux.HandleFunc("/fonts/", s.handleStatic)
+		mux.HandleFunc("/style.css", s.handleStatic)
+		mux.HandleFunc("/game.css", s.handleStatic)
+		mux.HandleFunc("/game.js", s.handleStatic)
+		mux.HandleFunc("/kula.svg", s.handleStatic)
+		mux.HandleFunc("/favicon.ico", s.handleStatic)
+
+		log.Printf("Web UI and API enabled")
+	} else {
+		log.Printf("Web UI and API disabled")
+	}
 
 	if s.cfg.PrometheusMetrics.Enabled {
 		mux.Handle("/metrics", loggingMiddleware(s.cfg, http.HandlerFunc(s.handleMetrics)))
@@ -234,20 +257,6 @@ func (s *Server) Start() error {
 		mux.HandleFunc("/health", s.handleHealth)
 		mux.HandleFunc("/status", s.handleHealth)
 	}
-
-	// Templated HTML files
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/index.html", s.handleIndex)
-	mux.HandleFunc("/game.html", s.handleGame)
-
-	// Static assets handler
-	mux.HandleFunc("/js/", s.handleStatic)
-	mux.HandleFunc("/fonts/", s.handleStatic)
-	mux.HandleFunc("/style.css", s.handleStatic)
-	mux.HandleFunc("/game.css", s.handleStatic)
-	mux.HandleFunc("/game.js", s.handleStatic)
-	mux.HandleFunc("/kula.svg", s.handleStatic)
-	mux.HandleFunc("/favicon.ico", s.handleStatic)
 
 	go s.hub.run()
 	go func() {

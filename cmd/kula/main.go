@@ -125,11 +125,28 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 
 	// Enforce Landlock sandbox: restrict filesystem and network access
 	// to only what Kula needs. Non-fatal on unsupported kernels.
-	if err := sandbox.Enforce(configPath, cfg.Storage.Directory, cfg.Web.Port); err != nil {
+	port := 0
+	if cfg.Web.Enabled {
+		port = cfg.Web.Port
+	}
+	if err := sandbox.Enforce(configPath, cfg.Storage.Directory, port); err != nil {
 		log.Printf("Warning: Landlock sandbox not enforced: %v", err)
 	}
 
-	server := web.NewServer(cfg.Web, cfg.Global, coll, store, cfg.Storage.Directory)
+	var server *web.Server
+	if cfg.Web.Enabled {
+
+		server = web.NewServer(cfg.Web, cfg.Global, coll, store, cfg.Storage.Directory)
+
+		// Start web server
+		go func() {
+			if err := server.Start(); err != nil {
+				log.Fatalf("Web server error: %v", err)
+			}
+		}()
+	} else {
+		log.Printf("Web server disabled by configuration")
+	}
 
 	// Signal handling with Context
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
@@ -145,7 +162,9 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 		if err := store.WriteSample(sample); err != nil {
 			log.Printf("Storage write error: %v", err)
 		}
-		server.BroadcastSample(sample)
+		if server != nil {
+			server.BroadcastSample(sample)
+		}
 
 		for {
 			select {
@@ -154,17 +173,12 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 				if err := store.WriteSample(sample); err != nil {
 					log.Printf("Storage write error: %v", err)
 				}
-				server.BroadcastSample(sample)
+				if server != nil {
+					server.BroadcastSample(sample)
+				}
 			case <-ctx.Done():
 				return
 			}
-		}
-	}()
-
-	// Start web server
-	go func() {
-		if err := server.Start(); err != nil {
-			log.Fatalf("Web server error: %v", err)
 		}
 	}()
 
@@ -174,10 +188,12 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 
 	log.Println("Shutting down...")
 
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
-	defer cancel()
-	if err := server.Shutdown(shutdownCtx); err != nil {
-		log.Printf("Web server shutdown error: %v", err)
+	if server != nil {
+		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(shutdownCtx); err != nil {
+			log.Printf("Web server shutdown error: %v", err)
+		}
 	}
 }
 

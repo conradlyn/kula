@@ -49,6 +49,7 @@ type TierConfig struct {
 
 type WebConfig struct {
 	Enabled            bool        `yaml:"enabled"`
+	UI                 bool        `yaml:"ui"`
 	Listen             string      `yaml:"listen"`
 	Port               int         `yaml:"port"`
 	Auth               AuthConfig  `yaml:"auth"`
@@ -138,6 +139,7 @@ func DefaultConfig() *Config {
 		},
 		Web: WebConfig{
 			Enabled:            true,
+			UI:                 true,
 			Listen:             "",
 			Port:               27960,
 			PrometheusMetrics: MetricsConfig{

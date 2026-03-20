@@ -65,11 +65,14 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 	}
 
 	// Build network rules: only allow binding to the web port
-	if webPort < 1 || webPort > 65535 {
-		return fmt.Errorf("sandbox: invalid web port %d", webPort)
-	}
-	netRules := []landlock.Rule{
-		landlock.BindTCP(uint16(webPort)),
+	var netRules []landlock.Rule
+	if webPort > 0 {
+		if webPort > 65535 {
+			return fmt.Errorf("sandbox: invalid web port %d", webPort)
+		}
+		netRules = []landlock.Rule{
+			landlock.BindTCP(uint16(webPort)),
+		}
 	}
 
 	// Combine all rules
@@ -95,7 +98,9 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 
 	var netStatus string
 	// Network restrictions (BindTCP) require ABI v4+ (kernel 6.7+)
-	if abi < 4 {
+	if webPort == 0 {
+		netStatus = ", net: disabled"
+	} else if abi < 4 {
 		netStatus = " (network protection NOT supported by kernel, ABI < 4)"
 	} else {
 		netStatus = fmt.Sprintf(", net: bind TCP/%d", webPort)
@@ -112,8 +117,12 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 func BuildRuleSummary(configPath string, storageDir string, webPort int) string {
 	absConfig, _ := filepath.Abs(configPath)
 	absStorage, _ := filepath.Abs(storageDir)
+	net := fmt.Sprintf("bind TCP/%d", webPort)
+	if webPort == 0 {
+		net = "disabled"
+	}
 	return fmt.Sprintf(
-		"FS: /proc[ro] /sys[ro] %s[ro] %s[rw] | Net: bind TCP/%d",
-		absConfig, absStorage, webPort,
+		"FS: /proc[ro] /sys[ro] %s[ro] %s[rw] | Net: %s",
+		absConfig, absStorage, net,
 	)
 }
