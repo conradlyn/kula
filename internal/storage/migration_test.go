@@ -1,0 +1,116 @@
+package storage
+
+import (
+	"encoding/binary"
+	"encoding/json"
+	"kula/internal/collector"
+	"os"
+	"path/filepath"
+	"testing"
+	"time"
+)
+
+func TestTierMigration_JSONToBinary(t *testing.T) {
+	tmpDir := t.TempDir()
+	path := filepath.Join(tmpDir, "test_tier.dat")
+	maxSize := int64(64 * 1024)
+	maxData := maxSize - headerSize
+
+	// 1. Manually create a legacy JSON (v1) tier file
+	f, err := os.Create(path)
+	if err != nil {
+		t.Fatalf("Failed to create test file: %v", err)
+	}
+
+	// Write v1 header
+	header := make([]byte, headerSize)
+	copy(header[0:4], magicString)
+	binary.LittleEndian.PutUint64(header[8:16], 1) // codecVer = 1
+	binary.LittleEndian.PutUint64(header[16:24], uint64(maxData))
+	
+	// Prepare some sample data
+	ts1 := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
+	ts2 := time.Date(2026, 1, 1, 10, 0, 1, 0, time.UTC)
+	
+	s1 := &AggregatedSample{
+		Timestamp: ts1,
+		Duration:  time.Second,
+		Data:      &collector.Sample{Timestamp: ts1, System: collector.SystemStats{Hostname: "host1"}},
+	}
+	s2 := &AggregatedSample{
+		Timestamp: ts2,
+		Duration:  time.Second,
+		Data:      &collector.Sample{Timestamp: ts2, System: collector.SystemStats{Hostname: "host2"}},
+	}
+
+	data1, _ := json.Marshal(s1)
+	data2, _ := json.Marshal(s2)
+
+	// Write records to file
+	off := int64(0)
+	writeRecord := func(data []byte) {
+		lenBuf := make([]byte, 4)
+		binary.LittleEndian.PutUint32(lenBuf, uint32(len(data)))
+		if _, err := f.WriteAt(lenBuf, headerSize+off); err != nil {
+			t.Fatalf("Failed to write length buffer: %v", err)
+		}
+		if _, err := f.WriteAt(data, headerSize+off+4); err != nil {
+			t.Fatalf("Failed to write data: %v", err)
+		}
+		off += 4 + int64(len(data))
+	}
+	writeRecord(data1)
+	writeRecord(data2)
+
+	// Update header with counts and offsets
+	binary.LittleEndian.PutUint64(header[24:32], uint64(off))
+	binary.LittleEndian.PutUint64(header[32:40], 2)
+	binary.LittleEndian.PutUint64(header[40:48], uint64(ts1.UnixNano()))
+	binary.LittleEndian.PutUint64(header[48:56], uint64(ts2.UnixNano()))
+	if _, err := f.WriteAt(header, 0); err != nil {
+		t.Fatalf("Failed to write header: %v", err)
+	}
+	_ = f.Close()
+
+	// 2. Open with OpenTier (should trigger migration)
+	tier, err := OpenTier(path, maxSize)
+	if err != nil {
+		t.Fatalf("OpenTier failed: %v", err)
+	}
+	defer func() { _ = tier.Close() }()
+
+	// 3. Verify migration
+	if tier.codecVer != codecVersion2 {
+		t.Errorf("Expected codec version %d, got %d", codecVersion2, tier.codecVer)
+	}
+	if tier.Count() != 2 {
+		t.Errorf("Expected count 2, got %d", tier.Count())
+	}
+
+	samples, err := tier.ReadRange(ts1, ts2)
+	if err != nil {
+		t.Fatalf("ReadRange failed: %v", err)
+	}
+	if len(samples) != 2 {
+		t.Errorf("Expected 2 samples, got %d", len(samples))
+	} else {
+		if samples[0].Data.System.Hostname != "host1" {
+			t.Errorf("Sample 1 hostname = %q, want \"host1\"", samples[0].Data.System.Hostname)
+		}
+		if samples[1].Data.System.Hostname != "host2" {
+			t.Errorf("Sample 2 hostname = %q, want \"host2\"", samples[1].Data.System.Hostname)
+		}
+	}
+
+	// 4. Verify file content on disk is NOT JSON
+	// Binary v2 records start with recordKindBinary (0x02)
+	f2, _ := os.Open(path)
+	defer func() { _ = f2.Close() }()
+	peak := make([]byte, 5)
+	if _, err := f2.ReadAt(peak, headerSize+4); err != nil {
+		t.Fatalf("Failed to read back migrated data: %v", err)
+	}
+	if peak[0] != 0x02 {
+		t.Errorf("Expected record kind %02x, got %02x (likely still JSON)", 0x02, peak[0])
+	}
+}

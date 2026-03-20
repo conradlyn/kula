@@ -7,6 +7,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
+## [0.11.0] - TBA
+
+### Added
+
+- Storage v2: binary format replacing JSON in tier files, resulting in significant performance improvements
+- Storage v1 to v2 migration feature
+- Prometheus metrics endpoint: `/metrics` with optional token-based auth (disabled by default)
+- In-process query cache
+- Health check endpoints (/status & /health)
+- New config option: web.prometheus_metrics
+- New config option: web.ui - enable/disable web ui/dashboard
+
+### Deprecated
+
+- Storage v1 (legacy JSON)
+
+### Security
+
+- Landlock ABI version check at startup
+
+### Fixed
+
+- Config web.enable having no effect
+
 ## [0.10.0] - 2026-03-17
 
 ### Added

@@ -22,9 +22,9 @@ import (
 	"sync"
 	"time"
 
-	"kula-szpiegula/internal/collector"
-	"kula-szpiegula/internal/config"
-	"kula-szpiegula/internal/storage"
+	"kula/internal/collector"
+	"kula/internal/config"
+	"kula/internal/storage"
 )
 
 //go:embed static
@@ -181,6 +181,9 @@ func (s *Server) securityMiddleware(next http.Handler) http.Handler {
 }
 
 func (s *Server) Start() error {
+	if !s.cfg.Enabled {
+		return nil
+	}
 	if err := s.auth.LoadSessions(); err != nil {
 		log.Printf("Warning: failed to load sessions: %v", err)
 	}
@@ -209,26 +212,51 @@ func (s *Server) Start() error {
 		),
 	)
 
-	// Apply auth to API routes (except login and auth status)
-	mux.Handle("/api/login", loggedApiMux)
-	mux.Handle("/api/logout", loggedApiMux)
-	mux.Handle("/api/auth/status", loggedApiMux)
-	mux.Handle("/api/", s.auth.AuthMiddleware(loggedApiMux))
-	mux.Handle("/ws", wsHandler)
+	if s.cfg.UI {
+		// Apply auth to API routes (except login and auth status)
+		mux.Handle("/api/login", loggedApiMux)
+		mux.Handle("/api/logout", loggedApiMux)
+		mux.Handle("/api/auth/status", loggedApiMux)
+		mux.Handle("/api/", s.auth.AuthMiddleware(loggedApiMux))
+		mux.Handle("/ws", wsHandler)
 
-	// Templated HTML files
-	mux.HandleFunc("/", s.handleIndex)
-	mux.HandleFunc("/index.html", s.handleIndex)
-	mux.HandleFunc("/game.html", s.handleGame)
+		// Templated HTML files
+		mux.HandleFunc("/", s.handleIndex)
+		mux.HandleFunc("/index.html", s.handleIndex)
+		mux.HandleFunc("/game.html", s.handleGame)
 
-	// Static assets handler
-	mux.HandleFunc("/js/", s.handleStatic)
-	mux.HandleFunc("/fonts/", s.handleStatic)
-	mux.HandleFunc("/style.css", s.handleStatic)
-	mux.HandleFunc("/game.css", s.handleStatic)
-	mux.HandleFunc("/game.js", s.handleStatic)
-	mux.HandleFunc("/kula.svg", s.handleStatic)
-	mux.HandleFunc("/favicon.ico", s.handleStatic)
+		// Static assets handler
+		mux.HandleFunc("/js/", s.handleStatic)
+		mux.HandleFunc("/fonts/", s.handleStatic)
+		mux.HandleFunc("/style.css", s.handleStatic)
+		mux.HandleFunc("/game.css", s.handleStatic)
+		mux.HandleFunc("/game.js", s.handleStatic)
+		mux.HandleFunc("/kula.svg", s.handleStatic)
+		mux.HandleFunc("/favicon.ico", s.handleStatic)
+
+		log.Printf("Web UI and API enabled")
+	} else {
+		log.Printf("Web UI and API disabled")
+	}
+
+	if s.cfg.PrometheusMetrics.Enabled {
+		mux.Handle("/metrics", loggingMiddleware(s.cfg, http.HandlerFunc(s.handleMetrics)))
+		if s.cfg.PrometheusMetrics.Token != "" {
+			log.Printf("Prometheus metrics enabled at /metrics with bearer token authentication")
+		} else {
+			log.Printf("Prometheus metrics enabled at /metrics without authentication")
+		}
+	}
+
+	// Apply request logging to liveness endpoints when enabled
+	if s.cfg.Logging.Enabled {
+		mux.Handle("/health", loggingMiddleware(s.cfg, http.HandlerFunc(s.handleHealth)))
+		mux.Handle("/status", loggingMiddleware(s.cfg, http.HandlerFunc(s.handleHealth)))
+	} else {
+		// Fallback registrations when logging is disabled
+		mux.HandleFunc("/health", s.handleHealth)
+		mux.HandleFunc("/status", s.handleHealth)
+	}
 
 	go s.hub.run()
 	go func() {
@@ -489,7 +517,7 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	token, err := s.auth.CreateSession(creds.Username, ip, r.UserAgent())
+	token, err := s.auth.CreateSession(creds.Username)
 	if err != nil {
 		jsonError(w, "internal server error", http.StatusInternalServerError)
 		return
@@ -546,11 +574,8 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 	if !s.cfg.Auth.Enabled {
 		status["authenticated"] = true
 	} else {
-		ip := getClientIP(r, s.cfg.TrustProxy)
-		userAgent := r.UserAgent()
-
 		cookie, err := r.Cookie("kula_session")
-		if err == nil && s.auth.ValidateSession(cookie.Value, ip, userAgent) {
+		if err == nil && s.auth.ValidateSession(cookie.Value) {
 			status["authenticated"] = true
 		}
 	}
@@ -663,6 +688,13 @@ func getClientIP(r *http.Request, trustProxy bool) string {
 	}
 	return host
 }
+
+func (s *Server) handleHealth(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte("kula is healthy"))
+}
+
 func (s *Server) handleIndex(w http.ResponseWriter, r *http.Request) {
 	if r.URL.Path != "/" && r.URL.Path != "/index.html" {
 		s.handleStatic(w, r)

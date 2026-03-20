@@ -25,13 +25,13 @@ func (c *Collector) collectSystem() SystemStats {
 		fields := strings.Fields(string(data))
 		if len(fields) >= 1 {
 			s.Uptime = c.parseFloat(fields[0], 64, "system.uptime")
-			s.UptimeHuman = formatUptime(s.Uptime)
+			s.UptimeHuman = FormatUptime(s.Uptime)
 		}
 	}
 
 	// Entropy
 	if data, err := os.ReadFile(filepath.Join(procPath, "sys/kernel/random/entropy_avail")); err == nil {
-		s.Entropy, _ = strconv.Atoi(strings.TrimSpace(string(data)))
+		s.Entropy = int(c.parseInt(strings.TrimSpace(string(data)), 10, 32, "system.entropy"))
 	}
 
 	// Clock source
@@ -124,7 +124,7 @@ func countUsersFromProc() int {
 			continue
 		}
 		pid := entry.Name()
-		if _, err := strconv.Atoi(pid); err != nil {
+		if _, err := strconv.ParseInt(pid, 10, 64); err != nil {
 			continue
 		}
 

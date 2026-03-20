@@ -18,6 +18,7 @@ import (
 	"path/filepath"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
+	llsyscall "github.com/landlock-lsm/go-landlock/landlock/syscall"
 )
 
 // Enforce applies Landlock restrictions to the current process.
@@ -64,11 +65,14 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 	}
 
 	// Build network rules: only allow binding to the web port
-	if webPort < 1 || webPort > 65535 {
-		return fmt.Errorf("sandbox: invalid web port %d", webPort)
-	}
-	netRules := []landlock.Rule{
-		landlock.BindTCP(uint16(webPort)),
+	var netRules []landlock.Rule
+	if webPort > 0 {
+		if webPort > 65535 {
+			return fmt.Errorf("sandbox: invalid web port %d", webPort)
+		}
+		netRules = []landlock.Rule{
+			landlock.BindTCP(uint16(webPort)),
+		}
 	}
 
 	// Combine all rules
@@ -76,13 +80,34 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 
 	// Apply Landlock restrictions using V5 with BestEffort.
 	// V5 (kernel 6.7+) includes: filesystem + networking + ioctl on devices.
+	abi, err := llsyscall.LandlockGetABIVersion()
+	if err != nil {
+		log.Printf("Landlock not supported or disabled by kernel (skipping sandbox enforcement): %v", err)
+		return nil
+	}
+
+	if abi < 1 {
+		log.Println("Landlock ABI < 1, skipping sandbox enforcement")
+		return nil
+	}
+
 	err = landlock.V5.BestEffort().Restrict(allRules...)
 	if err != nil {
 		return fmt.Errorf("sandbox: enforcing landlock: %w", err)
 	}
 
-	log.Printf("Landlock sandbox enforced (paths: /proc[ro] /sys[ro] %s[ro] %s[rw], net: bind TCP/%d)",
-		absConfigPath, absStorageDir, webPort)
+	var netStatus string
+	// Network restrictions (BindTCP) require ABI v4+ (kernel 6.7+)
+	if webPort == 0 {
+		netStatus = ", net: disabled"
+	} else if abi < 4 {
+		netStatus = " (network protection NOT supported by kernel, ABI < 4)"
+	} else {
+		netStatus = fmt.Sprintf(", net: bind TCP/%d", webPort)
+	}
+
+	log.Printf("Landlock sandbox enforced (ABI v%d, paths: /proc[ro] /sys[ro] %s[ro] %s[rw]%s)",
+		abi, absConfigPath, absStorageDir, netStatus)
 
 	return nil
 }
@@ -92,8 +117,12 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 func BuildRuleSummary(configPath string, storageDir string, webPort int) string {
 	absConfig, _ := filepath.Abs(configPath)
 	absStorage, _ := filepath.Abs(storageDir)
+	net := fmt.Sprintf("bind TCP/%d", webPort)
+	if webPort == 0 {
+		net = "disabled"
+	}
 	return fmt.Sprintf(
-		"FS: /proc[ro] /sys[ro] %s[ro] %s[rw] | Net: bind TCP/%d",
-		absConfig, absStorage, webPort,
+		"FS: /proc[ro] /sys[ro] %s[ro] %s[rw] | Net: %s",
+		absConfig, absStorage, net,
 	)
 }

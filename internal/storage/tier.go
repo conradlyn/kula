@@ -6,14 +6,17 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"sync"
+	"syscall"
 	"time"
 )
 
 // Tier implements a single ring-buffer storage tier.
 // File format:
 //   Header (64 bytes):
-//     [0:8]   magic "KULASPIE"
+//     [0:4]   magic "KULA"
+//     [4:8]   reserved
 //     [8:16]  version (uint64)
 //     [16:24] max data size (uint64)
 //     [24:32] write offset within data region (uint64)
@@ -26,9 +29,10 @@ import (
 //     When write wraps around, it overwrites from the beginning.
 
 const (
-	headerSize  = 64
-	magicString = "KULASPIE"
-	version     = 1
+	headerSize    = 64
+	magicString   = "KULA"
+	version       = 1
+	codecVersion2 = 2
 )
 
 type Tier struct {
@@ -41,6 +45,7 @@ type Tier struct {
 	oldestTS time.Time
 	newestTS time.Time
 	wrapped  bool
+	codecVer uint64 // 1 = legacy JSON, 2 = binary
 }
 
 func OpenTier(path string, maxSize int64) (*Tier, error) {
@@ -79,10 +84,20 @@ func OpenTier(path string, maxSize int64) (*Tier, error) {
 	} else {
 		t.writeOff = 0
 		t.count = 0
+		t.codecVer = codecVersion2 // new files start binary
 		if err := t.writeHeader(); err != nil {
 			_ = f.Close()
 			return nil, err
 		}
+	}
+
+	if t.codecVer < codecVersion2 && t.count > 0 {
+		fmt.Printf("Storage migration: legacy JSON detected in %s, starting conversion to binary v2...\n", path)
+		if err := t.migrateToBinary(); err != nil {
+			_ = t.file.Close()
+			return nil, fmt.Errorf("migration failed for %s: %w", path, err)
+		}
+		fmt.Printf("Storage migration: %s converted to binary v2 successfully.\n", path)
 	}
 
 	return t, nil
@@ -94,12 +109,20 @@ func (t *Tier) readHeader() error {
 		return err
 	}
 
-	magic := string(buf[0:8])
+	magic := string(buf[0:4])
 	if magic != magicString {
-		return fmt.Errorf("invalid magic: %s", magic)
+		return fmt.Errorf("invalid magic: %q", magic)
 	}
 
+	v := binary.LittleEndian.Uint64(buf[8:16])
+	if v == 0 {
+		v = 1
+	}
+	t.codecVer = v
 	t.maxData = int64(binary.LittleEndian.Uint64(buf[16:24]))
+	if t.maxData == 0 {
+		return fmt.Errorf("invalid header: maxData is zero")
+	}
 	t.writeOff = int64(binary.LittleEndian.Uint64(buf[24:32]))
 	t.count = binary.LittleEndian.Uint64(buf[32:40])
 
@@ -125,8 +148,8 @@ func (t *Tier) readHeader() error {
 
 func (t *Tier) writeHeader() error {
 	buf := make([]byte, headerSize)
-	copy(buf[0:8], magicString)
-	binary.LittleEndian.PutUint64(buf[8:16], version)
+	copy(buf[0:4], magicString)
+	binary.LittleEndian.PutUint64(buf[8:16], t.codecVer)
 	binary.LittleEndian.PutUint64(buf[16:24], uint64(t.maxData))
 	binary.LittleEndian.PutUint64(buf[24:32], uint64(t.writeOff))
 	binary.LittleEndian.PutUint64(buf[32:40], t.count)
@@ -144,7 +167,9 @@ func (t *Tier) writeHeader() error {
 
 // Write stores a sample in the ring buffer.
 func (t *Tier) Write(s *AggregatedSample) error {
-	data, err := encodeSample(s)
+	// encodeSampleV returns [kind][preamble][fixed][variable...] — the full
+	// on-disk payload including the recordKindBinary byte at [0].
+	data, err := encodeSampleV(s)
 	if err != nil {
 		return err
 	}
@@ -162,18 +187,17 @@ func (t *Tier) Write(s *AggregatedSample) error {
 		// Write a zero sentinel to mark end-of-segment so ReadRange
 		// knows there are no more records in this tail region.
 		if t.writeOff+4 <= t.maxData {
-			sentinel := make([]byte, 4)
-			// sentinel is already all zeros (dataLen == 0)
-			_, _ = t.file.WriteAt(sentinel, headerSize+t.writeOff)
+			var sentinel [4]byte // zero-value sentinel (dataLen == 0)
+			_, _ = t.file.WriteAt(sentinel[:], headerSize+t.writeOff)
 		}
 		t.writeOff = 0
 		t.wrapped = true
 	}
-	lenBuf := make([]byte, 4)
-	binary.LittleEndian.PutUint32(lenBuf, uint32(len(data)))
+	var lenBuf [4]byte
+	binary.LittleEndian.PutUint32(lenBuf[:], uint32(len(data)))
 
 	fileOff := headerSize + t.writeOff
-	if _, err := t.file.WriteAt(lenBuf, fileOff); err != nil {
+	if _, err := t.file.WriteAt(lenBuf[:], fileOff); err != nil {
 		return err
 	}
 	if _, err := t.file.WriteAt(data, fileOff+4); err != nil {
@@ -197,6 +221,12 @@ func (t *Tier) Write(s *AggregatedSample) error {
 		}
 	}
 
+	// Bump codec version to binary on first write to a legacy JSON file.
+	if t.codecVer < codecVersion2 {
+		t.codecVer = codecVersion2
+		_ = t.writeHeader()
+	}
+
 	// Update header periodically (every 10 writes to reduce I/O)
 	if t.count%10 == 0 {
 		return t.writeHeader()
@@ -215,65 +245,80 @@ func (t *Tier) ReadRange(from, to time.Time) ([]*AggregatedSample, error) {
 
 	var samples []*AggregatedSample
 
-	// Build list of (offset, length) segments to scan.
-	// When wrapped, we scan two segments:
-	//   1. writeOff..maxData  (older data from previous pass)
-	//   2. 0..writeOff        (newer data written after wrap)
-	// When not wrapped, we scan one segment: 0..writeOff.
+	// Build list of (start, size) segments to scan in chronological order.
+	//
+	// When wrapped two segments exist:
+	//   1. writeOff..maxData  — older records from the previous ring pass
+	//   2. 0..writeOff        — newer records written after the wrap
+	// When not wrapped: one segment 0..writeOff.
+	//
+	// For v2 binary files and wrapped tiers, we check whether 'from' is past
+	// the start of segment 2; if so we skip segment 1 entirely (safe because
+	// each segment always starts on a record boundary).
 	type segment struct{ start, size int64 }
 	var segments []segment
 
 	if t.wrapped {
-		segments = append(segments, segment{t.writeOff, t.maxData - t.writeOff})
-		segments = append(segments, segment{0, t.writeOff})
+		seg1 := segment{t.writeOff, t.maxData - t.writeOff}
+		seg2 := segment{0, t.writeOff}
+
+		if t.codecVer >= codecVersion2 && t.writeOff > 0 {
+			// Peek at the oldest record in segment 2 (data region offset 0).
+			// If 'from' is at or after that timestamp we can skip segment 1 entirely.
+			seg2Oldest, err := t.readTimestampAt(0)
+			if err == nil && !from.Before(seg2Oldest) {
+				segments = []segment{seg2}
+			} else {
+				segments = []segment{seg1, seg2}
+			}
+		} else {
+			segments = []segment{seg1, seg2}
+		}
 	} else {
-		segments = append(segments, segment{0, t.writeOff})
+		segments = []segment{{0, t.writeOff}}
 	}
 
 	for _, seg := range segments {
 		bytesRead := int64(0)
 
-		// Use buffered reader for drastic performance improvement over thousands of reads
+		// Use buffered reader for drastic performance improvement over thousands of reads.
 		sr := io.NewSectionReader(t.file, headerSize+seg.start, seg.size)
 		br := bufio.NewReaderSize(sr, 1024*1024)
 
 		for bytesRead < seg.size {
-			// Not enough room for a length prefix in this segment
 			if seg.size-bytesRead < 4 {
 				break
 			}
 
-			// Read length
 			lenBuf := make([]byte, 4)
 			if _, err := io.ReadFull(br, lenBuf); err != nil {
 				break
 			}
 			dataLen := binary.LittleEndian.Uint32(lenBuf)
 
-			// Zero sentinel or invalid length: no more records in this segment
 			if dataLen == 0 || int64(dataLen) > t.maxData {
 				break
 			}
 
 			recordLen := int64(4 + dataLen)
 			if bytesRead+recordLen > seg.size {
-				// Record extends beyond this segment boundary
 				break
 			}
 
-			// Read data
 			data := make([]byte, dataLen)
 			if _, err := io.ReadFull(br, data); err != nil {
 				break
 			}
 
-			// Pre-filter using fast timestamp extraction
 			ts, err := extractTimestamp(data)
 			if err != nil {
-				// Fallback to full decode if fast extraction fails
-				sample, err := decodeSample(data)
-				if err == nil {
-					if !sample.Timestamp.Before(from) && !sample.Timestamp.After(to) {
+				// Fallback: full decode for JSON records or unreadable binary.
+				sample, decErr := t.readRecord(data)
+				if decErr == nil {
+					if sample.Timestamp.After(to) {
+						break
+					}
+					if !sample.Timestamp.Before(from) {
 						samples = append(samples, sample)
 					}
 				}
@@ -281,21 +326,23 @@ func (t *Tier) ReadRange(from, to time.Time) ([]*AggregatedSample, error) {
 				continue
 			}
 
-			// Skip full decode if out of bounds
-			if ts.Before(from) || ts.After(to) {
+			// Records are chronological within a segment: past the window → done.
+			if ts.After(to) {
+				break
+			}
+
+			if ts.Before(from) {
 				bytesRead += recordLen
 				continue
 			}
 
-			// In bounds, do full decode
-			sample, err := decodeSample(data)
+			sample, err := t.readRecord(data)
 			if err != nil {
 				bytesRead += recordLen
 				continue
 			}
 
 			samples = append(samples, sample)
-
 			bytesRead += recordLen
 		}
 	}
@@ -376,7 +423,7 @@ func (t *Tier) ReadLatest(n int) ([]*AggregatedSample, error) {
 		if _, err := t.file.ReadAt(data, loc.offset+4); err != nil {
 			continue
 		}
-		sample, err := decodeSample(data)
+		sample, err := t.readRecord(data)
 		if err == nil {
 			samples = append(samples, sample)
 		}
@@ -400,23 +447,219 @@ func (t *Tier) Flush() error {
 	return t.writeHeader()
 }
 
-// readTimestampAt reads the timestamp of the first record at the given data-region
-// offset. Returns an error if the record is invalid. Must be called under at least
-// a read lock (Write holds the write lock, which is sufficient).
+// readRecord decodes a payload using per-record format detection.
+//
+//   - recordKindBinary (0x02): kind-tagged binary written by current code
+//   - '{' (0x7B):              legacy JSON record
+//   - anything else:           legacy binary record (no kind byte)
+func (t *Tier) readRecord(data []byte) (*AggregatedSample, error) {
+	if len(data) == 0 {
+		return nil, fmt.Errorf("empty record")
+	}
+	switch data[0] {
+	case recordKindBinary:
+		return decodeSample(data[1:])
+	case '{':
+		return decodeSampleJSON(data)
+	default:
+		// Legacy binary record written before the kind-byte format.
+		return decodeSample(data)
+	}
+}
+
+// readTimestampAt reads the timestamp of the record at the given data-region
+// offset. Returns an error if the record is invalid. Must be called under at
+// least a read lock (Write holds the write lock, which is sufficient).
+//
+// Format detection uses the explicit kind byte for new binary records and falls
+// back to content sniffing for legacy formats (JSON: '{'; binary: no kind byte).
 func (t *Tier) readTimestampAt(dataOffset int64) (time.Time, error) {
-	lenBuf := make([]byte, 4)
-	if _, err := t.file.ReadAt(lenBuf, headerSize+dataOffset); err != nil {
+	// 4-byte length prefix + 1 kind byte + 8-byte timestamp = 13 bytes covers all
+	// three formats in a single ReadAt call.
+	var buf [13]byte
+	if _, err := t.file.ReadAt(buf[:], headerSize+dataOffset); err != nil {
 		return time.Time{}, err
 	}
-	dataLen := binary.LittleEndian.Uint32(lenBuf)
+	dataLen := binary.LittleEndian.Uint32(buf[0:4])
 	if dataLen == 0 || int64(dataLen) > t.maxData {
 		return time.Time{}, fmt.Errorf("invalid record length %d at offset %d", dataLen, dataOffset)
 	}
-	data := make([]byte, dataLen)
-	if _, err := t.file.ReadAt(data, headerSize+dataOffset+4); err != nil {
-		return time.Time{}, err
+
+	switch buf[4] {
+	case recordKindBinary:
+		// Kind-tagged binary record: timestamp follows the kind byte.
+		if dataLen < 9 {
+			return time.Time{}, fmt.Errorf("binary record too short for timestamp: %d bytes", dataLen)
+		}
+		return time.Unix(0, int64(binary.LittleEndian.Uint64(buf[5:13]))), nil
+	case '{':
+		// Legacy JSON record: must fully decode to get timestamp.
+		data := make([]byte, dataLen)
+		if _, err := t.file.ReadAt(data, headerSize+dataOffset+4); err != nil {
+			return time.Time{}, err
+		}
+		s, err := decodeSampleJSON(data)
+		if err != nil {
+			return time.Time{}, err
+		}
+		return s.Timestamp, nil
+	default:
+		// Legacy binary record (no kind byte): timestamp at start of payload.
+		if dataLen < 8 {
+			return time.Time{}, fmt.Errorf("legacy binary record too short: %d bytes", dataLen)
+		}
+		return time.Unix(0, int64(binary.LittleEndian.Uint64(buf[4:12]))), nil
 	}
-	return extractTimestamp(data)
+}
+
+// migrateToBinary converts a legacy (v1) tier file to binary (v2) in-place.
+// It reads all records in chronological order and rewrites them to a new v2 file.
+func (t *Tier) migrateToBinary() error {
+	// 1. Pre-check: Disk space.
+	// We need enough space for a full copy of the tier file.
+	var stat syscall.Statfs_t
+	if err := syscall.Statfs(filepath.Dir(t.path), &stat); err != nil {
+		return fmt.Errorf("statfs failed: %w", err)
+	}
+	available := int64(stat.Bavail) * int64(stat.Bsize)
+	required := headerSize + t.maxData
+	if available < required {
+		return fmt.Errorf("insufficient disk space for migration: need %d MB, have %d MB", required/1e6, available/1e6)
+	}
+
+	tmpPath := t.path + ".migration"
+	// Ensure cleanup if we fail
+	defer func() { _ = os.Remove(tmpPath) }()
+
+	// Open original for reading (already open in t.file) and tmp for writing.
+	tmpFile, err := os.OpenFile(tmpPath, os.O_RDWR|os.O_CREATE|os.O_TRUNC, 0600)
+	if err != nil {
+		return err
+	}
+	defer func() { _ = tmpFile.Close() }()
+
+	// Initialize tmp tier structure to use its Write logic.
+	tmpTier := &Tier{
+		file:     tmpFile,
+		path:     tmpPath,
+		maxData:  t.maxData,
+		codecVer: codecVersion2,
+	}
+	if err := tmpTier.writeHeader(); err != nil {
+		return err
+	}
+
+	// Read all records from the current tier in chronological order.
+	type segment struct{ start, size int64 }
+	var segments []segment
+	if t.wrapped {
+		segments = []segment{
+			{t.writeOff, t.maxData - t.writeOff},
+			{0, t.writeOff},
+		}
+	} else {
+		segments = []segment{{0, t.writeOff}}
+	}
+
+	processed := 0
+	for _, seg := range segments {
+		bytesRead := int64(0)
+		sr := io.NewSectionReader(t.file, headerSize+seg.start, seg.size)
+		br := bufio.NewReaderSize(sr, 1024*1024)
+
+		for bytesRead < seg.size {
+			if seg.size-bytesRead < 4 {
+				break
+			}
+			lenBuf := make([]byte, 4)
+			if _, err := io.ReadFull(br, lenBuf); err != nil {
+				break
+			}
+			dataLen := binary.LittleEndian.Uint32(lenBuf)
+			if dataLen == 0 || int64(dataLen) > t.maxData {
+				break
+			}
+			recordLen := int64(4 + dataLen)
+			if bytesRead+recordLen > seg.size {
+				break
+			}
+
+			data := make([]byte, dataLen)
+			if _, err := io.ReadFull(br, data); err != nil {
+				break
+			}
+
+			// Decode record (handles JSON/binary automatically)
+			sample, err := t.readRecord(data)
+			if err != nil {
+				// Skip corrupted records during migration to keep as much as possible.
+				bytesRead += recordLen
+				continue
+			}
+
+			// Write to new binary format
+			if err := tmpTier.Write(sample); err != nil {
+				return fmt.Errorf("writing migrated record: %w", err)
+			}
+			processed++
+			if processed%1000 == 0 {
+				fmt.Printf("  ...migrated %d records in %s\n", processed, filepath.Base(t.path))
+			}
+			bytesRead += recordLen
+		}
+	}
+
+	fmt.Printf("  Migration complete: %d records processed for %s\n", processed, filepath.Base(t.path))
+
+	// Finalize tmp file
+	if err := tmpTier.writeHeader(); err != nil {
+		return err
+	}
+	if err := tmpFile.Sync(); err != nil {
+		return err
+	}
+	_ = tmpFile.Close()
+
+	// Atomic replacement:
+	// 1. Rename tmp to original (this replaces the file on disk)
+	if err := os.Rename(tmpPath, t.path); err != nil {
+		return fmt.Errorf("renaming migrated file: %w", err)
+	}
+
+	// 2. Open the NEW file FIRST before closing the old one to avoid nil state
+	newFile, err := os.OpenFile(t.path, os.O_RDWR, 0600)
+	if err != nil {
+		return fmt.Errorf("opening migrated file: %w", err)
+	}
+
+	// 3. Swap file handles and close old
+	oldFile := t.file
+	t.file = newFile
+	if oldFile != nil {
+		_ = oldFile.Close()
+	}
+
+	// 4. RESET STALE STATE before reading the new header
+	// This prevents the "wrapped" state leak bug.
+	t.wrapped = false
+	t.count = 0
+	t.writeOff = 0
+	t.oldestTS = time.Time{}
+	t.newestTS = time.Time{}
+
+	// 5. Load new metadata
+	if err := t.readHeader(); err != nil {
+		return fmt.Errorf("reading migrated header: %w", err)
+	}
+
+	// 6. Verification: Ensure we can read the newest record
+	if t.count > 0 {
+		if _, err := t.ReadLatest(1); err != nil {
+			return fmt.Errorf("migration verification failed for %s: %w", t.path, err)
+		}
+	}
+
+	return nil
 }
 
 // OldestTimestamp returns the oldest sample timestamp in this tier.
@@ -464,9 +707,9 @@ func InspectTierFile(path string) (*TierInfo, error) {
 		return nil, fmt.Errorf("reading header: %w", err)
 	}
 
-	magic := string(buf[0:8])
+	magic := string(buf[0:4])
 	if magic != magicString {
-		return nil, fmt.Errorf("invalid magic: %s", magic)
+		return nil, fmt.Errorf("invalid magic: %q", magic)
 	}
 
 	info := &TierInfo{

@@ -42,7 +42,14 @@ storage:
 
 # Web UI settings
 web:
+  # Master switch for the web server (default: true)
+  # When false, the network listener is not opened at all.
   enabled: true
+
+  # Toggle the Web UI/dashboard and its API (default: true)
+  # When false, only Prometheus metrics and health endpoints remain active.
+  ui: true
+
   listen: "" # use [] brackets for IPv6 addresses, e.g. "[::1]"
   port: 27960
 
@@ -87,6 +94,14 @@ web:
     # "perf" (adds DB fetch metrics)
     # "debug" (i.e. collector auto-discovery)
     level: "perf"
+
+  # Prometheus metrics endpoint (optional)
+  prometheus_metrics:
+    enabled: false
+    # The endpoint is unauthorized by default.
+    # You can optionally set a bearer token to secure it.
+    # Scrapers must send: Authorization: Bearer <token>
+    token: ""
 
   # Authentication (optional)
   auth:

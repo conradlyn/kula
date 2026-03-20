@@ -148,8 +148,8 @@ func (c *Collector) collectLoadAvg() LoadAvg {
 
 	parts := strings.Split(fields[3], "/")
 	if len(parts) == 2 {
-		la.Running, _ = strconv.Atoi(parts[0])
-		la.Total, _ = strconv.Atoi(parts[1])
+		la.Running = int(c.parseInt(parts[0], 10, 32, "loadavg.running"))
+		la.Total = int(c.parseInt(parts[1], 10, 32, "loadavg.total"))
 	}
 	return la
 }
@@ -413,8 +413,8 @@ func parseMemInfo() map[string]uint64 {
 	return result
 }
 
-// formatUptime converts seconds to human-readable uptime.
-func formatUptime(secs float64) string {
+// FormatUptime converts seconds to human-readable uptime.
+func FormatUptime(secs float64) string {
 	d := int(secs) / 86400
 	h := (int(secs) % 86400) / 3600
 	m := (int(secs) % 3600) / 60

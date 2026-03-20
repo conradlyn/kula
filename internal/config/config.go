@@ -49,9 +49,11 @@ type TierConfig struct {
 
 type WebConfig struct {
 	Enabled            bool        `yaml:"enabled"`
+	UI                 bool        `yaml:"ui"`
 	Listen             string      `yaml:"listen"`
 	Port               int         `yaml:"port"`
 	Auth               AuthConfig  `yaml:"auth"`
+	PrometheusMetrics  MetricsConfig `yaml:"prometheus_metrics"`
 	JoinMetrics        bool        `yaml:"join_metrics"`
 	DefaultAggregation string      `yaml:"default_aggregation"`
 	Logging            LogConfig   `yaml:"logging"`
@@ -61,9 +63,14 @@ type WebConfig struct {
 	Version            string      `yaml:"-"` // injected at runtime, not from config file
 	OS                 string      `yaml:"-"`
 	Kernel             string      `yaml:"-"`
-	Arch                  string      `yaml:"-"`
-	MaxWebsocketConns     int         `yaml:"max_websocket_conns"`
+	Arch               string      `yaml:"-"`
+	MaxWebsocketConns  int         `yaml:"max_websocket_conns"`
 	MaxWebsocketConnsPerIP int         `yaml:"max_websocket_conns_per_ip"`
+}
+
+type MetricsConfig struct {
+	Enabled bool   `yaml:"enabled"`
+	Token   string `yaml:"token"`
 }
 
 type GraphConfig struct {
@@ -132,8 +139,12 @@ func DefaultConfig() *Config {
 		},
 		Web: WebConfig{
 			Enabled:            true,
+			UI:                 true,
 			Listen:             "",
 			Port:               27960,
+			PrometheusMetrics: MetricsConfig{
+				Enabled: false,
+			},
 			JoinMetrics:        false,
 			DefaultAggregation: "avg",
 			Auth: AuthConfig{
@@ -181,7 +192,8 @@ func Load(path string) (*Config, error) {
 		cfg.Web.Listen = listen
 	}
 	if portStr := os.Getenv("KULA_PORT"); portStr != "" {
-		if port, err := strconv.Atoi(portStr); err == nil {
+		if port64, err := strconv.ParseInt(portStr, 10, 32); err == nil {
+			port := int(port64)
 			if port > 0 && port <= 65535 {
 				cfg.Web.Port = port
 			} else {

@@ -1,7 +1,9 @@
 package storage
 
 import (
-	"kula-szpiegula/internal/collector"
+	"encoding/binary"
+	"encoding/json"
+	"kula/internal/collector"
 	"testing"
 	"time"
 )
@@ -80,8 +82,9 @@ func TestEncodeDecode(t *testing.T) {
 	if decoded.Data == nil {
 		t.Fatal("Decoded Data is nil")
 	}
-	if decoded.Data.CPU.Total.Usage != original.Data.CPU.Total.Usage {
-		t.Errorf("CPU Usage = %f, want %f", decoded.Data.CPU.Total.Usage, original.Data.CPU.Total.Usage)
+	// float32 round-trip: allow 0.01 epsilon due to float64→float32 narrowing.
+	if diff := decoded.Data.CPU.Total.Usage - original.Data.CPU.Total.Usage; diff > 0.01 || diff < -0.01 {
+		t.Errorf("CPU Usage = %f, want ~%f", decoded.Data.CPU.Total.Usage, original.Data.CPU.Total.Usage)
 	}
 	if decoded.Data.CPU.NumCores != original.Data.CPU.NumCores {
 		t.Errorf("NumCores = %d, want %d", decoded.Data.CPU.NumCores, original.Data.CPU.NumCores)
@@ -104,7 +107,7 @@ func TestEncodeDecode(t *testing.T) {
 }
 
 func TestEncodeDecodeRoundTripTimestamp(t *testing.T) {
-	// Verify sub-millisecond precision is preserved.
+	// Binary codec stores raw UnixNano — nanosecond precision is exact.
 	ts := time.Date(2026, 3, 4, 12, 30, 0, 123456789, time.UTC)
 	s := &AggregatedSample{
 		Timestamp: ts,
@@ -131,16 +134,26 @@ func TestDecodeInvalid(t *testing.T) {
 		name  string
 		input []byte
 	}{
-		{"not-json", []byte("not json")},
 		{"empty", []byte{}},
-		{"truncated-json", []byte(`{"ts":"2026`)},
-		{"wrong-type", []byte(`{"ts":12345,"dur":1000000000}`)},
+		{"truncated-preamble", []byte{0x01, 0x02, 0x03}}, // < 18 bytes
+		// Preamble OK with flagHasData set, but no fixed block follows.
+		{"flagged-no-fixed-block", func() []byte {
+			b := make([]byte, 18)
+			binary.LittleEndian.PutUint16(b[16:], flagHasData)
+			return b
+		}()},
+		// Preamble OK, flagHasData set, but fixed block is truncated.
+		{"truncated-fixed-block", func() []byte {
+			b := make([]byte, 18+10) // need 218 bytes for fixed block
+			binary.LittleEndian.PutUint16(b[16:], flagHasData)
+			return b
+		}()},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			_, err := decodeSample(tc.input)
 			if err == nil {
-				t.Errorf("decodeSample(%q) expected error, got nil", tc.input)
+				t.Errorf("decodeSample(%q) expected error, got nil", tc.name)
 			}
 		})
 	}
@@ -191,29 +204,62 @@ func TestExtractTimestamp_HappyPath(t *testing.T) {
 	}
 }
 
-func TestExtractTimestamp_Missing(t *testing.T) {
-	_, err := extractTimestamp([]byte(`{"dur":1000000000}`))
+func TestExtractTimestamp_TooShort(t *testing.T) {
+	_, err := extractTimestamp([]byte{0x01, 0x02, 0x03})
 	if err == nil {
-		t.Error("extractTimestamp() with no 'ts' field should return error")
+		t.Error("extractTimestamp() with < 8 bytes should return error")
 	}
 }
 
-func TestExtractTimestamp_Malformed(t *testing.T) {
-	_, err := extractTimestamp([]byte(`{"ts":"not-a-time"}`))
-	if err == nil {
-		t.Error("extractTimestamp() with malformed timestamp should return error")
+// TestExtractTimestamp_KindByte exercises the recordKindBinary fast path:
+// the on-disk format written by encodeSampleV has the kind byte at [0] and
+// the timestamp at [1:9]. This is the path taken on every real disk read.
+func TestExtractTimestamp_KindByte(t *testing.T) {
+	ts := time.Date(2026, 3, 4, 0, 0, 0, 0, time.UTC)
+	s := &AggregatedSample{
+		Timestamp: ts,
+		Duration:  time.Second,
+		Data:      &collector.Sample{Timestamp: ts},
+	}
+
+	disk, err := encodeSampleV(s)
+	if err != nil {
+		t.Fatalf("encodeSampleV: %v", err)
+	}
+	if disk[0] != recordKindBinary {
+		t.Fatalf("disk[0] = %02x, want recordKindBinary", disk[0])
+	}
+
+	got, err := extractTimestamp(disk)
+	if err != nil {
+		t.Fatalf("extractTimestamp(kind-byte payload): %v", err)
+	}
+	if !got.Equal(ts) {
+		t.Errorf("extractTimestamp = %v, want %v", got, ts)
+	}
+
+	// Ensure it agrees with a full decode after stripping the kind byte.
+	full, err := decodeSample(disk[1:])
+	if err != nil {
+		t.Fatalf("decodeSample(disk[1:]): %v", err)
+	}
+	if !got.Equal(full.Timestamp) {
+		t.Errorf("extractTimestamp %v != decodeSample %v", got, full.Timestamp)
 	}
 }
 
-func TestExtractTimestamp_Unterminated(t *testing.T) {
-	_, err := extractTimestamp([]byte(`{"ts":"2026-03-04T00:00:00Z`))
-	if err == nil {
-		t.Error("extractTimestamp() with unterminated string should return error")
+func TestExtractTimestamp_Zero(t *testing.T) {
+	// 8 zero bytes is a valid payload — decodes to time.Unix(0, 0).
+	got, err := extractTimestamp(make([]byte, 8))
+	if err != nil {
+		t.Errorf("extractTimestamp(zeroes) unexpected error: %v", err)
+	}
+	if !got.Equal(time.Unix(0, 0)) {
+		t.Errorf("extractTimestamp(zeroes) = %v, want time.Unix(0,0)", got)
 	}
 }
 
 func TestExtractTimestamp_MatchesFullDecode(t *testing.T) {
-	// Fast-path extracted timestamp must exactly match the full JSON decode.
 	now := time.Now().Truncate(time.Millisecond)
 	s := &AggregatedSample{
 		Timestamp: now,
@@ -232,6 +278,108 @@ func TestExtractTimestamp_MatchesFullDecode(t *testing.T) {
 	}
 	if !fast.Equal(full.Timestamp) {
 		t.Errorf("extractTimestamp %v != decodeSample %v", fast, full.Timestamp)
+	}
+}
+
+// ---- TestTimestampOffset ----------------------------------------------------
+
+// TestTimestampOffset verifies the timestamp layout in both payload formats:
+//   - encodeSample()  (raw, no kind byte): timestamp at payload[0:8]
+//   - encodeSampleV() (on-disk format):   kind byte at [0], timestamp at [1:9]
+func TestTimestampOffset(t *testing.T) {
+	ts := time.Date(2026, 3, 19, 12, 0, 0, 999999999, time.UTC)
+	s := &AggregatedSample{
+		Timestamp: ts,
+		Duration:  time.Second,
+		Data:      &collector.Sample{Timestamp: ts},
+	}
+
+	// Raw payload (encodeSample): timestamp at [0:8], no kind byte.
+	raw, err := encodeSample(s)
+	if err != nil {
+		t.Fatalf("encodeSample: %v", err)
+	}
+	if len(raw) < 8 {
+		t.Fatalf("raw payload too short: %d", len(raw))
+	}
+	ns := int64(binary.LittleEndian.Uint64(raw[0:8]))
+	if ns != ts.UnixNano() {
+		t.Errorf("raw payload[0:8] = %d, want %d (ts.UnixNano)", ns, ts.UnixNano())
+	}
+
+	// On-disk payload (encodeSampleV): kind byte at [0], timestamp at [1:9].
+	disk, err := encodeSampleV(s)
+	if err != nil {
+		t.Fatalf("encodeSampleV: %v", err)
+	}
+	if len(disk) < 9 {
+		t.Fatalf("disk payload too short: %d", len(disk))
+	}
+	if disk[0] != recordKindBinary {
+		t.Errorf("disk[0] = %02x, want recordKindBinary (%02x)", disk[0], recordKindBinary)
+	}
+	nsOnDisk := int64(binary.LittleEndian.Uint64(disk[1:9]))
+	if nsOnDisk != ts.UnixNano() {
+		t.Errorf("disk payload[1:9] = %d, want %d (ts.UnixNano)", nsOnDisk, ts.UnixNano())
+	}
+}
+
+// ---- TestRecordSizeReduction ------------------------------------------------
+
+// TestRecordSizeReduction checks that a representative binary tier-0 record is
+// well under the old JSON size (~3 KB). Target: < 1200 bytes.
+func TestRecordSizeReduction(t *testing.T) {
+	s := makeSampleFull(time.Now())
+	s.Data.CPU.Sensors = []collector.CPUTempSensor{{Name: "Tctl", Value: 62.5}}
+	s.Data.Disks.Devices = []collector.DiskDevice{{Name: "sda", Utilization: 15.3}}
+	s.Data.Disks.FileSystems = []collector.FileSystemInfo{
+		{Device: "/dev/sda1", MountPoint: "/", FSType: "ext4", Total: 500e9, Used: 200e9},
+	}
+	data, err := encodeSample(s)
+	if err != nil {
+		t.Fatalf("encodeSample: %v", err)
+	}
+	t.Logf("binary record size: %d bytes (JSON equivalent ~3 KB)", len(data))
+	if len(data) > 1200 {
+		t.Errorf("record too large: %d bytes, want < 1200", len(data))
+	}
+}
+
+// ---- TestBinaryMigration ----------------------------------------------------
+
+// TestBinaryMigration verifies that version-1 (JSON) records are decoded
+// correctly through the decodeSampleV dispatch path.
+func TestBinaryMigration(t *testing.T) {
+	ts := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	original := &AggregatedSample{
+		Timestamp: ts,
+		Duration:  time.Second,
+		Data: &collector.Sample{
+			Timestamp: ts,
+			CPU:       collector.CPUStats{Total: collector.CPUCoreStats{Usage: 77.7}},
+			System:    collector.SystemStats{Hostname: "legacy-host"},
+		},
+	}
+
+	// Encode as JSON (simulates an existing v1 file record)
+	jsonPayload, err := json.Marshal(original)
+	if err != nil {
+		t.Fatalf("json.Marshal: %v", err)
+	}
+
+	// ver=1 records use the JSON path; call the decoder directly.
+	decoded, err := decodeSampleJSON(jsonPayload)
+	if err != nil {
+		t.Fatalf("decodeSampleJSON: %v", err)
+	}
+	if decoded.Data == nil {
+		t.Fatal("decoded.Data is nil")
+	}
+	if decoded.Data.System.Hostname != "legacy-host" {
+		t.Errorf("Hostname = %q, want \"legacy-host\"", decoded.Data.System.Hostname)
+	}
+	if decoded.Data.CPU.Total.Usage != 77.7 {
+		t.Errorf("CPU Usage = %f, want 77.7", decoded.Data.CPU.Total.Usage)
 	}
 }
 
@@ -266,7 +414,7 @@ func BenchmarkExtractTimestamp(b *testing.B) {
 	}
 }
 
-// BenchmarkExtractVsFullDecode shows the speedup of the fast path over full JSON decode.
+// BenchmarkExtractVsFullDecode shows the speedup of the fixed-offset fast path.
 func BenchmarkExtractVsFullDecode(b *testing.B) {
 	s := makeSampleFull(time.Now())
 	data, _ := encodeSample(s)
