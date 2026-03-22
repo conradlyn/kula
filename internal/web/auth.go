@@ -39,6 +39,7 @@ type RateLimiter struct {
 
 type session struct {
 	username  string
+	csrfToken string
 	createdAt time.Time
 	expiresAt time.Time
 }
@@ -47,6 +48,7 @@ type session struct {
 type sessionData struct {
 	Token     string    `json:"token"`
 	Username  string    `json:"username"`
+	CSRFToken string    `json:"csrf_token,omitempty"`
 	IP        string    `json:"ip,omitempty"`
 	UserAgent string    `json:"user_agent,omitempty"`
 	CreatedAt time.Time `json:"created_at"`
@@ -134,9 +136,15 @@ func (a *AuthManager) CreateSession(username string) (string, error) {
 	if err != nil {
 		return "", err
 	}
+	csrfToken, err := generateToken()
+	if err != nil {
+		return "", err
+	}
+
 	hashedToken := hashToken(token)
 	a.sessions[hashedToken] = &session{
 		username:  username,
+		csrfToken: csrfToken,
 		createdAt: time.Now(),
 		expiresAt: time.Now().Add(a.cfg.SessionTimeout),
 	}
@@ -164,6 +172,18 @@ func (a *AuthManager) ValidateSession(token string) bool {
 	sess.expiresAt = time.Now().Add(a.cfg.SessionTimeout)
 
 	return true
+}
+
+// GetCSRFToken retrieves the CSRF token associated with a session token.
+func (a *AuthManager) GetCSRFToken(token string) string {
+	a.mu.RLock()
+	defer a.mu.RUnlock()
+
+	hashedToken := hashToken(token)
+	if sess, ok := a.sessions[hashedToken]; ok {
+		return sess.csrfToken
+	}
+	return ""
 }
 
 // RevokeSession manually destroys a session by its token.
@@ -259,6 +279,7 @@ func (a *AuthManager) LoadSessions() error {
 			// In hashed version, sd.Token is actually the hash
 			a.sessions[sd.Token] = &session{
 				username:  sd.Username,
+				csrfToken: sd.CSRFToken,
 				createdAt: sd.CreatedAt,
 				expiresAt: sd.ExpiresAt,
 			}
@@ -280,6 +301,7 @@ func (a *AuthManager) SaveSessions() error {
 			toSave = append(toSave, sessionData{
 				Token:     hashedToken,
 				Username:  sess.username,
+				CSRFToken: sess.csrfToken,
 				CreatedAt: sess.createdAt,
 				ExpiresAt: sess.expiresAt,
 			})
@@ -323,13 +345,31 @@ func (a *AuthManager) ValidateOrigin(r *http.Request) bool {
 	return strings.EqualFold(u.Host, r.Host)
 }
 
-// CSRFMiddleware enforces origin validation for state-modifying requests.
+// CSRFMiddleware enforces origin validation and token matching for state-modifying requests.
 func (a *AuthManager) CSRFMiddleware(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodGet && r.Method != http.MethodHead && r.Method != http.MethodOptions {
+			// 1. Origin/Referer Validation (Defense in Depth)
 			if !a.ValidateOrigin(r) {
 				http.Error(w, `{"error":"invalid origin"}`, http.StatusForbidden)
 				return
+			}
+
+			// 2. Synchronizer Token Validation (Only if Auth is enabled and request is authenticated)
+			if a.cfg.Enabled {
+				cookie, err := r.Cookie("kula_session")
+				if err == nil {
+					// We verify if this session requires CSRF token matching.
+					// We only enforce the token check if it's a valid session.
+					if a.ValidateSession(cookie.Value) {
+						expectedToken := a.GetCSRFToken(cookie.Value)
+						providedToken := r.Header.Get("X-CSRF-Token")
+						if expectedToken == "" || subtle.ConstantTimeCompare([]byte(expectedToken), []byte(providedToken)) != 1 {
+							http.Error(w, `{"error":"invalid csrf token"}`, http.StatusForbidden)
+							return
+						}
+					}
+				}
 			}
 		}
 		next.ServeHTTP(w, r)

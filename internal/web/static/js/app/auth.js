@@ -17,6 +17,9 @@ function checkAuth() {
                 if (data.auth_required) {
                     document.getElementById('btn-logout')?.classList.remove('hidden');
                 }
+                if (data.csrf_token) {
+                    state.csrfToken = data.csrf_token;
+                }
                 fetchConfig().finally(() => {
                     connectWS();
                 });
@@ -113,7 +116,10 @@ function handleLogin(e) {
             if (!r.ok) throw new Error('Invalid credentials');
             return r.json();
         })
-        .then(() => {
+        .then(data => {
+            if (data && data.csrf_token) {
+                state.csrfToken = data.csrf_token;
+            }
             document.getElementById('login-overlay')?.classList.add('hidden');
             document.getElementById('dashboard').style.filter = '';
             document.getElementById('btn-logout')?.classList.remove('hidden');
@@ -128,7 +134,14 @@ function handleLogin(e) {
 }
 
 function handleLogout() {
-    fetch('/api/logout', { method: 'POST' })
+    const headers = {};
+    if (state.csrfToken) {
+        headers['X-CSRF-Token'] = state.csrfToken;
+    }
+    fetch('/api/logout', { 
+        method: 'POST',
+        headers: headers
+    })
         .then(() => {
             if (state.ws) {
                 state.ws.close();

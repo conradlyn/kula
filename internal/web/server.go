@@ -539,8 +539,13 @@ func (s *Server) handleLogin(w http.ResponseWriter, r *http.Request) {
 		SameSite: http.SameSiteStrictMode,
 	})
 
+	csrfToken := s.auth.GetCSRFToken(token)
+
 	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(map[string]string{"status": "logged in"}); err != nil {
+	if err := json.NewEncoder(w).Encode(map[string]string{
+		"status":     "logged in",
+		"csrf_token": csrfToken,
+	}); err != nil {
 		log.Printf("JSON encode error: %v", err)
 	}
 }
@@ -583,6 +588,7 @@ func (s *Server) handleAuthStatus(w http.ResponseWriter, r *http.Request) {
 		cookie, err := r.Cookie("kula_session")
 		if err == nil && s.auth.ValidateSession(cookie.Value) {
 			status["authenticated"] = true
+			status["csrf_token"] = s.auth.GetCSRFToken(cookie.Value)
 		}
 	}
 

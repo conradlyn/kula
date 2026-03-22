@@ -12,6 +12,11 @@ Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 ### Changed
 
 - Focus mode enhancements, option to hide gauges
+- Refine gauages responsiveness
+
+### Security
+
+- CSRF token protection
 
 ## [0.12.1] - 2026-03-22
 
