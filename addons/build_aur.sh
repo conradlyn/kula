@@ -33,7 +33,7 @@ if [ "${SOURCE_CHOICE}" = "2" ]; then
     echo "Using remote source (GitHub release tarball)"
     GITHUB_URL="https://github.com/c0m4r/kula"
     cat << EOF > "${AUR_DIR}/PKGBUILD"
-# Maintainer: c0m4r <https://github.com/c0m4r
+# Maintainer: c0m4r <https://github.com/c0m4r>
 pkgname=${PKG_NAME}
 pkgver=${VERSION}
 pkgrel=1
@@ -44,8 +44,15 @@ license=('AGPL-3.0')
 depends=('glibc')
 makedepends=('go')
 source=("\${pkgname}-\${pkgver}.tar.gz::${GITHUB_URL}/archive/\${pkgver}.tar.gz")
-sha256sums=('899a1ae2534016f2b5ddac399f0acdc3b3f29e05fac302fb2e5a0d2f2aa2fcf1')
+sha256sums=('baff8ddde4452ea22643da6b91a153c42652d2108692121f355a99128ff22064')
 install='kula.install'
+
+check() {
+  cd "\${pkgname}-\${pkgver}"
+  export CGO_ENABLED=1
+  go vet ./...
+  go test -v -race ./...
+}
 
 build() {
   cd "\${pkgname}-\${pkgver}"
@@ -209,6 +216,16 @@ pre_remove() {
         systemctl disable kula.service || true
     fi
 }
+EOF
+
+cd "${AUR_DIR}"
+makepkg --printsrcinfo > .SRCINFO
+cat << EOF > .gitignore
+*
+!/.gitignore
+!/kula.install
+!/PKGBUILD
+!/.SRCINFO
 EOF
 
 echo "AUR package files generated in ${AUR_DIR}/"

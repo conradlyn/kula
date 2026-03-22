@@ -179,6 +179,8 @@ journalctl -f -t kula
 
 ### Arch Linux / Manjaro (AUR)
 
+https://aur.archlinux.org/packages/kula
+
 ```bash
 git clone https://aur.archlinux.org/kula.git
 cd kula
