@@ -53,13 +53,22 @@ if [ "$ARG" == "cross" ] || [ "$ARG" == "all" ]; then
             ./cmd/kula/
     done
 else
-    echo "Building for current architecture..."
+    echo "Building kula for current architecture..."
     CGO_ENABLED=0 go build \
         -trimpath \
         -ldflags="-s -w" \
         -buildvcs=false \
         -o kula \
         ./cmd/kula/
+
+    echo "Building gen-mock-data..."
+
+    CGO_ENABLED=0 go build \
+        -trimpath \
+        -ldflags="-s -w" \
+        -buildvcs=false \
+        -o gen-mock-data \
+        ./cmd/gen-mock-data/
 fi
 
 echo "Build done!"
