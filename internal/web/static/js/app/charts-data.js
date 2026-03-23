@@ -448,6 +448,7 @@ export function syncZoom(sourceChart) {
 
     // Update the display to show the zoomed timeframe explicitly
     if (min && max) {
+        state.timeRange = null; // Exit preset range immediately on interaction
         const fmt = d => d.toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' });
         document.getElementById('time-range-display').textContent = `${fmt(new Date(min))} \u2192 ${fmt(new Date(max))} (Zoomed)`;
     }

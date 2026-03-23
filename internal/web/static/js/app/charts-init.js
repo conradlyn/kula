@@ -28,7 +28,10 @@ export function createTimeSeriesChart(canvasId, datasets, yConfig = {}, extraPlu
                     pan: {
                         enabled: true,
                         mode: 'x',
-                        onPanStart: function({ chart }) { if (state.timeRange !== null) return false; },
+                        onPanStart: function({ chart }) {
+                            state.pausedZoom = true;
+                            document.dispatchEvent(new Event('kula-sync-pause'));
+                        },
                         onPan: function({ chart }) { document.dispatchEvent(new CustomEvent('kula-zoom-sync', { detail: chart })); },
                         onPanComplete: function({ chart }) {
                             document.dispatchEvent(new CustomEvent('kula-zoom-sync', { detail: chart }));
@@ -38,7 +41,10 @@ export function createTimeSeriesChart(canvasId, datasets, yConfig = {}, extraPlu
                     zoom: {
                         drag: { enabled: true, backgroundColor: 'rgba(59,130,246,0.1)', borderColor: colors.blue, borderWidth: 1 },
                         mode: 'x',
-                        onZoomStart: function({ chart }) { if (state.timeRange !== null) return false; },
+                        onZoomStart: function({ chart }) {
+                            state.pausedZoom = true;
+                            document.dispatchEvent(new Event('kula-sync-pause'));
+                        },
                         onZoom: function({ chart }) { document.dispatchEvent(new CustomEvent('kula-zoom-sync', { detail: chart })); },
                         onZoomComplete: function({ chart }) {
                             document.dispatchEvent(new CustomEvent('kula-zoom-sync', { detail: chart }));
