@@ -8,3 +8,4 @@
 /config.yaml
 /gen-mock-data
 .~lock*
+__pycache__/
