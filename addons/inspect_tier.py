@@ -65,6 +65,10 @@ def _get_f32(data: bytes, off: int) -> Tuple[float, int]:
     return round(float(v), 6), off + 4
 
 
+def _get_i64(data: bytes, off: int) -> Tuple[int, int]:
+    return struct.unpack_from("<q", data, off)[0], off + 8
+
+
 def _get_f64(data: bytes, off: int) -> Tuple[float, int]:
     v = struct.unpack_from("<d", data, off)[0]
     return v, off + 8
@@ -254,6 +258,8 @@ def _decode_fixed(data: bytes, off: int) -> Tuple[Dict[str, Any], int]:
 #   4. Filesystems:         uint16 count + per-fs entries
 #   5. System strings:      hostname (str8), clock_source (str8)
 #   6. GPU entries:         uint16 count + per-GPU entries
+#   7. Application metrics: nginx (1B+52B), containers (u16+var),
+#                           postgres (1B+56B), custom (u16 groups+var)
 # ---------------------------------------------------------------------------
 
 
@@ -395,6 +401,117 @@ def _decode_variable(
         )
     if gpus:
         s["gpu"] = gpus
+
+    # 7. Application metrics (absent in older records — guard on remaining bytes)
+    if len(data) - off < 1:
+        return s, off
+
+    apps: Dict[str, Any] = {}
+
+    # 7a. Nginx (1-byte presence + 52-byte fixed block)
+    nginx_present, off = _get_u8(data, off)
+    if nginx_present != 0:
+        active_conn, off = _get_i32(data, off)
+        accepts, off = _get_u64(data, off)
+        handled, off = _get_u64(data, off)
+        requests, off = _get_u64(data, off)
+        accepts_ps, off = _get_f32(data, off)
+        handled_ps, off = _get_f32(data, off)
+        requests_ps, off = _get_f32(data, off)
+        reading, off = _get_i32(data, off)
+        writing, off = _get_i32(data, off)
+        waiting, off = _get_i32(data, off)
+        apps["nginx"] = {
+            "active_connections": active_conn,
+            "accepts": accepts,
+            "handled": handled,
+            "requests": requests,
+            "accepts_ps": accepts_ps,
+            "handled_ps": handled_ps,
+            "requests_ps": requests_ps,
+            "reading": reading,
+            "writing": writing,
+            "waiting": waiting,
+        }
+
+    # 7b. Containers (uint16 count + variable per container)
+    num_containers, off = _get_u16(data, off)
+    containers = []
+    for _ in range(num_containers):
+        ct_id, off = _get_str(data, off)
+        ct_name, off = _get_str(data, off)
+        cpu_pct, off = _get_f32(data, off)
+        mem_used, off = _get_u64(data, off)
+        mem_limit, off = _get_u64(data, off)
+        mem_pct, off = _get_f32(data, off)
+        net_rx_bps, off = _get_f32(data, off)
+        net_tx_bps, off = _get_f32(data, off)
+        disk_r_bps, off = _get_f32(data, off)
+        disk_w_bps, off = _get_f32(data, off)
+        containers.append(
+            {
+                "id": ct_id,
+                "name": ct_name,
+                "cpu_pct": cpu_pct,
+                "mem_used": mem_used,
+                "mem_limit": mem_limit,
+                "mem_pct": mem_pct,
+                "net_rx_bps": net_rx_bps,
+                "net_tx_bps": net_tx_bps,
+                "disk_r_bps": disk_r_bps,
+                "disk_w_bps": disk_w_bps,
+            }
+        )
+    if containers:
+        apps["containers"] = containers
+
+    # 7c. PostgreSQL (1-byte presence + 56-byte fixed block)
+    pg_present, off = _get_u8(data, off)
+    if pg_present != 0:
+        active_conns, off = _get_i32(data, off)
+        idle_conns, off = _get_i32(data, off)
+        max_conns, off = _get_i32(data, off)
+        tx_commit_ps, off = _get_f32(data, off)
+        tx_rollback_ps, off = _get_f32(data, off)
+        tup_fetched_ps, off = _get_f32(data, off)
+        tup_inserted_ps, off = _get_f32(data, off)
+        tup_updated_ps, off = _get_f32(data, off)
+        tup_deleted_ps, off = _get_f32(data, off)
+        blks_hit_pct, off = _get_f32(data, off)
+        dead_tuples, off = _get_i64(data, off)
+        db_size_bytes, off = _get_i64(data, off)
+        apps["postgres"] = {
+            "active_conns": active_conns,
+            "idle_conns": idle_conns,
+            "max_conns": max_conns,
+            "tx_commit_ps": tx_commit_ps,
+            "tx_rollback_ps": tx_rollback_ps,
+            "tup_fetched_ps": tup_fetched_ps,
+            "tup_inserted_ps": tup_inserted_ps,
+            "tup_updated_ps": tup_updated_ps,
+            "tup_deleted_ps": tup_deleted_ps,
+            "blks_hit_pct": blks_hit_pct,
+            "dead_tuples": dead_tuples,
+            "db_size_bytes": db_size_bytes,
+        }
+
+    # 7d. Custom metrics (uint16 group count, per group: str + uint16 metric count)
+    num_groups, off = _get_u16(data, off)
+    custom: Dict[str, List[Dict[str, Any]]] = {}
+    for _ in range(num_groups):
+        group_name, off = _get_str(data, off)
+        metric_count, off = _get_u16(data, off)
+        metrics = []
+        for _ in range(metric_count):
+            m_name, off = _get_str(data, off)
+            m_value, off = _get_f32(data, off)
+            metrics.append({"name": m_name, "value": m_value})
+        custom[group_name] = metrics
+    if custom:
+        apps["custom"] = custom
+
+    if apps:
+        s["apps"] = apps
 
     return s, off
 

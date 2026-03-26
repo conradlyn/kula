@@ -493,6 +493,23 @@ func (s *Server) handleConfig(w http.ResponseWriter, r *http.Request) {
 		},
 	}
 
+	// Expose custom metric configs so the frontend knows units and maxima
+	if customCfg := s.collector.CustomConfig(); len(customCfg) > 0 {
+		cm := make(map[string]interface{}, len(customCfg))
+		for group, metrics := range customCfg {
+			var mList []map[string]interface{}
+			for _, m := range metrics {
+				mList = append(mList, map[string]interface{}{
+					"name": m.Name,
+					"unit": m.Unit,
+					"max":  m.Max,
+				})
+			}
+			cm[group] = mList
+		}
+		info["custom_metrics"] = cm
+	}
+
 	if s.global.ShowVersion {
 		info["version"] = s.cfg.Version
 	}

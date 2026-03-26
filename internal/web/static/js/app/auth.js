@@ -98,6 +98,9 @@ export function fetchConfig() {
                     applySplitFromConfig(cfg.graphs.split);
                 }
             }
+            if (cfg.custom_metrics) {
+                state.customMetricsConfig = cfg.custom_metrics;
+            }
 
             const versionStr = cfg.show_version === false ? '' : ' v' + (cfg.version || '0.0.0');
             console.log(

@@ -4,12 +4,73 @@
    ============================================================ */
 'use strict';
 import { state, colors } from './state.js';
-import { setChartTimeRange, updateChartLabels } from './charts-init.js';
+import { formatBytesShort } from './utils.js';
+import { createTimeSeriesChart, setChartTimeRange, updateChartLabels } from './charts-init.js';
 import { updateHeader, updateSubtitles } from './header.js';
 import { updateGauges } from './gauges.js';
 import { evaluateAlerts } from './alerts.js';
 import { applyStoredFocusMode } from './focus-mode.js';
 import { addSampleToSplitCharts, updateSplitSelectors } from './split.js';
+
+// CSS order values for dynamic app chart grouping within the grid.
+const APP_ORDER_NGINX = 10;
+const APP_ORDER_CONTAINERS = 20;
+const APP_ORDER_POSTGRES = 30;
+const APP_ORDER_CUSTOM = 40;
+
+// createAppChartCard creates a chart-card DOM structure in the applications
+// grid and returns the canvas ID for use with createTimeSeriesChart.
+function createAppChartCard(cardId, chartId, subtitleId, title, order) {
+    const grid = document.getElementById('applications-grid');
+    if (!grid) return null;
+
+    const wrapper = document.createElement('div');
+    wrapper.className = 'chart-card';
+    wrapper.id = cardId;
+    wrapper.dataset.appChart = '';
+    wrapper.style.order = order;
+
+    const header = document.createElement('div');
+    header.className = 'chart-header';
+    const h3 = document.createElement('h3');
+    h3.textContent = title;
+    const span = document.createElement('span');
+    span.className = 'chart-subtitle';
+    span.id = subtitleId;
+    header.appendChild(h3);
+    header.appendChild(span);
+
+    const body = document.createElement('div');
+    body.className = 'chart-body';
+    const canvas = document.createElement('canvas');
+    canvas.id = chartId;
+    body.appendChild(canvas);
+
+    wrapper.appendChild(header);
+    wrapper.appendChild(body);
+
+    // If focus mode is active, place card in the combined grid and apply visibility
+    if (state.focusMode && !state.focusSelecting && state.focusVisible) {
+        const mainGrid = document.getElementById('charts-grid');
+        (mainGrid || grid).appendChild(wrapper);
+        wrapper.classList.toggle('focus-visible', state.focusVisible.includes(cardId));
+    } else if (state.focusSelecting) {
+        grid.appendChild(wrapper);
+        if (state.focusVisible?.includes(cardId)) wrapper.classList.add('focus-selected');
+        wrapper._focusClick = () => wrapper.classList.toggle('focus-selected');
+        wrapper.addEventListener('click', wrapper._focusClick);
+    } else {
+        grid.appendChild(wrapper);
+    }
+
+    return chartId;
+}
+
+// Helper: iterate all dynamic app chart instances (for utility functions).
+function forEachAppChart(fn) {
+    Object.values(state.containerCharts || {}).forEach(chart => { if (chart) fn(chart); });
+    Object.values(state.customCharts || {}).forEach(entry => { if (entry?.chart) fn(entry.chart); });
+}
 
 // ---- Data Update ----
 export function addSampleToCharts(item, ts) {
@@ -318,6 +379,265 @@ export function addSampleToCharts(item, ts) {
         }
     }
 
+    // ---- Applications (all charts created dynamically) ----
+    let appsVisible = false;
+    const seenContainers = new Set();
+    const seenCustom = new Set();
+    const colorList = [colors.blue, colors.green, colors.orange, colors.purple, colors.cyan, colors.red, colors.yellow, colors.pink, colors.teal, colors.lime];
+
+    // Nginx — create charts on first data, push data, update subtitles
+    if (s.apps?.nginx) {
+        const n = s.apps.nginx;
+        appsVisible = true;
+
+        if (!state.charts.nginxConn) {
+            createAppChartCard('card-nginx-connections', 'chart-nginx-connections', 'nginx-conn-subtitle', 'Nginx \u2014 Connections', APP_ORDER_NGINX);
+            state.charts.nginxConn = createTimeSeriesChart('chart-nginx-connections', [
+                { label: 'Active Connections', borderColor: colors.blue, backgroundColor: colors.blueAlpha, fill: true, data: [] },
+            ]);
+        }
+        if (state.charts.nginxConn) {
+            state.charts.nginxConn.data.datasets[0].data.push(point(n.active_conn));
+            const sub = document.getElementById('nginx-conn-subtitle');
+            if (sub) sub.textContent = `Active: ${n.active_conn}`;
+        }
+
+        if (!state.charts.nginxReqs) {
+            createAppChartCard('card-nginx-requests', 'chart-nginx-requests', 'nginx-reqs-subtitle', 'Nginx \u2014 Requests', APP_ORDER_NGINX + 1);
+            state.charts.nginxReqs = createTimeSeriesChart('chart-nginx-requests', [
+                { label: 'Accepts/s', borderColor: colors.green, data: [], fill: false },
+                { label: 'Handled/s', borderColor: colors.cyan, data: [], fill: false },
+                { label: 'Requests/s', borderColor: colors.blue, backgroundColor: colors.blueAlpha, fill: true, data: [] },
+            ]);
+        }
+        if (state.charts.nginxReqs) {
+            state.charts.nginxReqs.data.datasets[0].data.push(point(n.accepts_ps));
+            state.charts.nginxReqs.data.datasets[1].data.push(point(n.handled_ps));
+            state.charts.nginxReqs.data.datasets[2].data.push(point(n.requests_ps));
+            const sub = document.getElementById('nginx-reqs-subtitle');
+            if (sub) sub.textContent = `Req/s: ${n.requests_ps?.toFixed(1) || '0'}`;
+        }
+
+        if (!state.charts.nginxRw) {
+            createAppChartCard('card-nginx-rw', 'chart-nginx-rw', 'nginx-rw-subtitle', 'Nginx \u2014 Workers', APP_ORDER_NGINX + 2);
+            state.charts.nginxRw = createTimeSeriesChart('chart-nginx-rw', [
+                { label: 'Reading', borderColor: colors.green, data: [], fill: false },
+                { label: 'Writing', borderColor: colors.orange, data: [], fill: false },
+                { label: 'Waiting', borderColor: colors.yellow, data: [], fill: false },
+            ]);
+        }
+        if (state.charts.nginxRw) {
+            state.charts.nginxRw.data.datasets[0].data.push(point(n.reading));
+            state.charts.nginxRw.data.datasets[1].data.push(point(n.writing));
+            state.charts.nginxRw.data.datasets[2].data.push(point(n.waiting));
+            const sub = document.getElementById('nginx-rw-subtitle');
+            if (sub) sub.textContent = `R: ${n.reading}  W: ${n.writing}  Wait: ${n.waiting}`;
+        }
+    }
+
+    // Containers (dynamic charts, appended directly to grid)
+    if (s.apps?.containers?.length > 0) {
+        appsVisible = true;
+        for (const ct of s.apps.containers) {
+            const key = `container_${ct.id}`;
+
+            if (!state.containerCharts[key]) {
+                const label = ct.name || ct.id;
+                createAppChartCard(`card-${key}`, `chart-${key}`, `${key}-subtitle`, `Container \u2014 ${label}`, APP_ORDER_CONTAINERS);
+
+                const canvas = document.getElementById(`chart-${key}`);
+                const ctx = canvas?.getContext('2d');
+                if (ctx) {
+                    state.containerCharts[key] = new Chart(ctx, {
+                        type: 'line',
+                        data: {
+                            datasets: [
+                                { label: 'CPU %', borderColor: colors.blue, data: [], fill: false, yAxisID: 'y', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
+                                { label: 'Mem %', borderColor: colors.purple, data: [], fill: false, yAxisID: 'y', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
+                                { label: 'Net Rx B/s', borderColor: colors.green, data: [], fill: false, yAxisID: 'y1', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
+                                { label: 'Net Tx B/s', borderColor: colors.orange, data: [], fill: false, yAxisID: 'y1', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
+                            ]
+                        },
+                        options: {
+                            responsive: true, maintainAspectRatio: false, animation: false,
+                            interaction: { mode: 'index', intersect: false },
+                            plugins: { tooltip: { position: 'awayFromCursor' } },
+                            scales: {
+                                x: { type: 'time', display: true, time: { unit: 'minute' }, ticks: { maxTicksLimit: 6, maxRotation: 0, autoSkip: true } },
+                                y: { beginAtZero: true, position: 'left', title: { display: true, text: '%' } },
+                                y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { callback: v => formatBytesShort(v) + '/s' } },
+                            },
+                        }
+                    });
+                }
+            }
+
+            const chart = state.containerCharts[key];
+            if (chart) {
+                chart.data.datasets[0].data.push(point(ct.cpu_pct || 0));
+                chart.data.datasets[1].data.push(point(ct.mem_pct || 0));
+                chart.data.datasets[2].data.push(point(ct.net_rx_bps || 0));
+                chart.data.datasets[3].data.push(point(ct.net_tx_bps || 0));
+                if (!state.loadingHistory) chart.update('none');
+            }
+
+            const sub = document.getElementById(`${key}-subtitle`);
+            if (sub) sub.textContent = `CPU: ${(ct.cpu_pct || 0).toFixed(1)}%  Mem: ${(ct.mem_pct || 0).toFixed(1)}%`;
+
+            seenContainers.add(key);
+        }
+    }
+    // Hide container cards not in this sample
+    Object.keys(state.containerCharts || {}).forEach(k => {
+        const el = document.getElementById(`card-${k}`);
+        if (seenContainers.has(k)) {
+            el?.classList.remove('hidden');
+        } else {
+            el?.classList.add('hidden');
+        }
+    });
+
+    // PostgreSQL — create charts on first data
+    if (s.apps?.postgres) {
+        const pg = s.apps.postgres;
+        appsVisible = true;
+
+        if (!state.charts.pgConns) {
+            createAppChartCard('card-pg-connections', 'chart-pg-connections', 'pg-conn-subtitle', 'PostgreSQL \u2014 Connections', APP_ORDER_POSTGRES);
+            state.charts.pgConns = createTimeSeriesChart('chart-pg-connections', [
+                { label: 'Active', borderColor: colors.blue, data: [], fill: false },
+                { label: 'Idle', borderColor: colors.yellow, data: [], fill: false },
+                { label: 'Max', borderColor: colors.red, data: [], fill: false, borderDash: [4, 2] },
+            ]);
+        }
+        if (state.charts.pgConns) {
+            state.charts.pgConns.data.datasets[0].data.push(point(pg.active_conns));
+            state.charts.pgConns.data.datasets[1].data.push(point(pg.idle_conns));
+            state.charts.pgConns.data.datasets[2].data.push(point(pg.max_conns));
+            const sub = document.getElementById('pg-conn-subtitle');
+            if (sub) sub.textContent = `Active: ${pg.active_conns}  Idle: ${pg.idle_conns}  Max: ${pg.max_conns}`;
+        }
+
+        if (!state.charts.pgThroughput) {
+            createAppChartCard('card-pg-throughput', 'chart-pg-throughput', 'pg-tps-subtitle', 'PostgreSQL \u2014 TPS', APP_ORDER_POSTGRES + 1);
+            state.charts.pgThroughput = createTimeSeriesChart('chart-pg-throughput', [
+                { label: 'Commits/s', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
+                { label: 'Rollbacks/s', borderColor: colors.red, data: [], fill: false },
+            ]);
+        }
+        if (state.charts.pgThroughput) {
+            state.charts.pgThroughput.data.datasets[0].data.push(point(pg.tx_commit_ps));
+            state.charts.pgThroughput.data.datasets[1].data.push(point(pg.tx_rollback_ps));
+            const sub = document.getElementById('pg-tps-subtitle');
+            if (sub) sub.textContent = `TPS: ${(pg.tx_commit_ps || 0).toFixed(1)}  Rollbacks/s: ${(pg.tx_rollback_ps || 0).toFixed(1)}`;
+        }
+
+        if (!state.charts.pgBuffers) {
+            createAppChartCard('card-pg-buffers', 'chart-pg-buffers', 'pg-buffers-subtitle', 'PostgreSQL \u2014 Buffer Hit Ratio', APP_ORDER_POSTGRES + 2);
+            state.charts.pgBuffers = createTimeSeriesChart('chart-pg-buffers', [
+                { label: 'Buffer Hit %', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
+            ], { max: 100, ticks: { callback: v => v.toFixed(1) + '%' } });
+        }
+        if (state.charts.pgBuffers) {
+            state.charts.pgBuffers.data.datasets[0].data.push(point(pg.blks_hit_pct));
+            const sub = document.getElementById('pg-buffers-subtitle');
+            if (sub) sub.textContent = `Hit: ${(pg.blks_hit_pct || 0).toFixed(1)}%`;
+        }
+    }
+
+    // Custom metrics (dynamic charts per group, appended directly to grid)
+    if (s.apps?.custom) {
+        for (const [group, metrics] of Object.entries(s.apps.custom)) {
+            appsVisible = true;
+            if (!state.customCharts[group]) {
+                const cfgList = state.customMetricsConfig?.[group] || [];
+                const unit = cfgList.length > 0 ? cfgList[0].unit : '';
+                let maxVal = undefined;
+                if (cfgList.length > 0) {
+                    const m = Math.max(...cfgList.map(c => c.max || 0));
+                    if (m > 0 && m !== -Infinity) maxVal = m;
+                }
+
+                const datasets = cfgList.map((cfg, i) => ({
+                    label: cfg.name + (unit ? ` (${unit})` : ''),
+                    borderColor: colorList[i % colorList.length],
+                    data: [],
+                    fill: false,
+                    pointRadius: 0,
+                    borderWidth: 1.5,
+                    tension: 0.2,
+                }));
+
+                const title = group.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                createAppChartCard(`card-custom-${group}`, `chart-custom-${group}`, `custom-${group}-subtitle`, title, APP_ORDER_CUSTOM);
+
+                const canvas = document.getElementById(`chart-custom-${group}`);
+                const ctx = canvas?.getContext('2d');
+                if (ctx) {
+                    const yConfig = { beginAtZero: true };
+                    if (maxVal) yConfig.max = maxVal;
+                    if (unit) yConfig.title = { display: true, text: unit };
+
+                    state.customCharts[group] = {
+                        chart: new Chart(ctx, {
+                            type: 'line',
+                            data: { datasets },
+                            options: {
+                                responsive: true, maintainAspectRatio: false, animation: false,
+                                interaction: { mode: 'index', intersect: false },
+                                plugins: { tooltip: { position: 'awayFromCursor' } },
+                                scales: {
+                                    x: { type: 'time', display: true, time: { unit: 'minute' }, ticks: { maxTicksLimit: 6, maxRotation: 0, autoSkip: true } },
+                                    y: yConfig,
+                                },
+                            }
+                        }),
+                        names: cfgList.map(c => c.name),
+                    };
+                }
+            }
+
+            const entry = state.customCharts[group];
+            if (entry?.chart) {
+                const valMap = {};
+                for (const m of metrics) {
+                    valMap[m.name] = m.value;
+                }
+                for (let i = 0; i < entry.names.length; i++) {
+                    const v = valMap[entry.names[i]] ?? null;
+                    entry.chart.data.datasets[i].data.push(point(v));
+                }
+                if (!state.loadingHistory) entry.chart.update('none');
+
+                const sub = document.getElementById(`custom-${group}-subtitle`);
+                if (sub) {
+                    sub.textContent = metrics.map(m => `${m.name}: ${m.value}`).join('  ');
+                }
+            }
+            seenCustom.add(group);
+        }
+    }
+    // Hide custom cards not in this sample
+    Object.keys(state.customCharts || {}).forEach(k => {
+        const el = document.getElementById(`card-custom-${k}`);
+        if (seenCustom.has(k)) {
+            el?.classList.remove('hidden');
+        } else {
+            el?.classList.add('hidden');
+        }
+    });
+
+    // Show/hide applications section
+    const titleEl = document.getElementById('applications-title');
+    const gridEl = document.getElementById('applications-grid');
+    if (appsVisible) {
+        titleEl?.classList.remove('hidden');
+        gridEl?.classList.remove('hidden');
+    } else {
+        titleEl?.classList.add('hidden');
+        gridEl?.classList.add('hidden');
+    }
+
     // Feed split charts
     addSampleToSplitCharts(s, ts);
 }
@@ -337,6 +657,8 @@ export function updateAllCharts() {
             if (chart && typeof chart.update === 'function') chart.update('none');
         });
     });
+    // Also update dynamic app charts (containers, custom)
+    forEachAppChart(chart => chart.update('none'));
 }
 
 // Redraw charts from the active buffer (used when selected devices change)
@@ -378,6 +700,7 @@ export function trimChartsToTimeRange() {
     Object.values(state.splitCharts).forEach(typeCharts => {
         Object.values(typeCharts).forEach(trimChart);
     });
+    forEachAppChart(trimChart);
 
     // Keep dataBuffer in sync with the displayed time window
     const cutoffDate = new Date(cutoffMs);
@@ -387,21 +710,19 @@ export function trimChartsToTimeRange() {
 }
 
 export function clearAllChartData() {
-    Object.values(state.charts).forEach(chart => {
+    const clearChart = (chart) => {
         if (!chart?.data?.datasets) return;
         chart.data.datasets.forEach(ds => {
             if (Array.isArray(ds.data)) ds.data = [];
         });
-    });
+    };
+    Object.values(state.charts).forEach(clearChart);
     // Also clear split charts
     Object.values(state.splitCharts).forEach(typeCharts => {
-        Object.values(typeCharts).forEach(chart => {
-            if (!chart?.data?.datasets) return;
-            chart.data.datasets.forEach(ds => {
-                if (Array.isArray(ds.data)) ds.data = [];
-            });
-        });
+        Object.values(typeCharts).forEach(clearChart);
     });
+    // Also clear dynamic app charts
+    forEachAppChart(clearChart);
 }
 
 // Debounce timer for zoom-triggered history fetches.
@@ -488,6 +809,18 @@ export function syncZoom(sourceChart) {
             chart.update('none');
         });
     });
+    // Sync dynamic app charts
+    forEachAppChart(chart => {
+        if (!chart?.options?.scales?.x) return;
+        if (minUnit) {
+            chart.options.scales.x.time.minUnit = minUnit;
+        } else {
+            delete chart.options.scales.x.time.minUnit;
+        }
+        chart.options.scales.x.min = min;
+        chart.options.scales.x.max = max;
+        chart.update('none');
+    });
 
     // When zooming or panning, fetch the optimal data resolution for the new view.
     // If we're already at max resolution (1s) and the buffer completely covers the window,
@@ -560,12 +893,14 @@ export function fetchZoomedHistory(fromDate, toDate) {
             // Re-apply the zoom viewport so the user stays in the same window
             const minMs = fromDate.getTime();
             const maxMs = toDate.getTime();
-            Object.values(state.charts).forEach(chart => {
+            const reapplyZoom = (chart) => {
                 if (!chart?.options?.scales?.x) return;
                 chart.options.scales.x.min = minMs;
                 chart.options.scales.x.max = maxMs;
                 chart.update('none');
-            });
+            };
+            Object.values(state.charts).forEach(reapplyZoom);
+            forEachAppChart(reapplyZoom);
 
             // Treat the zoomed window as a custom range so trimChartsToTimeRange
             // leaves the data alone, and live samples arriving after this point
@@ -606,6 +941,7 @@ export function resetZoomAll() {
     Object.values(state.splitCharts).forEach(typeCharts => {
         Object.values(typeCharts).forEach(resetChart);
     });
+    forEachAppChart(resetChart);
 
     // Restore time range display text
     if (state.timeRange !== null) {
@@ -667,6 +1003,7 @@ export function addGapToCharts(ts) {
     Object.values(state.splitCharts).forEach(typeCharts => {
         Object.values(typeCharts).forEach(addGap);
     });
+    forEachAppChart(addGap);
 }
 
 // ---- Device Selectors ----

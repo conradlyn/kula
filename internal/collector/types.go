@@ -16,6 +16,7 @@ type Sample struct {
 	Process ProcessStats `json:"proc"`
 	Self    SelfStats    `json:"self"`
 	GPU     []GPUStats   `json:"gpu,omitempty"`
+	Apps    ApplicationsStats `json:"apps,omitempty"`
 }
 
 // CPUStats holds per-core and total CPU usage percentages.
@@ -169,4 +170,62 @@ type GPUStats struct {
 	VRAMUsedPct float64 `json:"vram_pct,omitempty"`
 	LoadPct     float64 `json:"load_pct,omitempty"`
 	PowerW      float64 `json:"power_w,omitempty"`
+}
+
+// ApplicationsStats holds metrics from external applications.
+type ApplicationsStats struct {
+	Nginx      *NginxStats                    `json:"nginx,omitempty"`
+	Containers []ContainerStats               `json:"containers,omitempty"`
+	Postgres   *PostgresStats                 `json:"postgres,omitempty"`
+	Custom     map[string][]CustomMetricValue  `json:"custom,omitempty"`
+}
+
+// NginxStats holds metrics parsed from the nginx stub_status module.
+type NginxStats struct {
+	ActiveConnections int     `json:"active_conn"`
+	Accepts           uint64  `json:"accepts"`
+	Handled           uint64  `json:"handled"`
+	Requests          uint64  `json:"requests"`
+	AcceptsPS         float64 `json:"accepts_ps"`
+	HandledPS         float64 `json:"handled_ps"`
+	RequestsPS        float64 `json:"requests_ps"`
+	Reading           int     `json:"reading"`
+	Writing           int     `json:"writing"`
+	Waiting           int     `json:"waiting"`
+}
+
+// ContainerStats holds per-container resource usage metrics.
+type ContainerStats struct {
+	ID       string  `json:"id"`
+	Name     string  `json:"name"`
+	CPUPct   float64 `json:"cpu_pct"`
+	MemUsed  uint64  `json:"mem_used"`
+	MemLimit uint64  `json:"mem_limit"`
+	MemPct   float64 `json:"mem_pct"`
+	NetRxBPS float64 `json:"net_rx_bps"`
+	NetTxBPS float64 `json:"net_tx_bps"`
+	DiskRBPS float64 `json:"disk_r_bps"`
+	DiskWBPS float64 `json:"disk_w_bps"`
+}
+
+// PostgresStats holds PostgreSQL database metrics.
+type PostgresStats struct {
+	ActiveConns   int     `json:"active_conns"`
+	IdleConns     int     `json:"idle_conns"`
+	MaxConns      int     `json:"max_conns"`
+	TxCommitPS    float64 `json:"tx_commit_ps"`
+	TxRollbackPS  float64 `json:"tx_rollback_ps"`
+	TupFetchedPS  float64 `json:"tup_fetched_ps"`
+	TupInsertedPS float64 `json:"tup_inserted_ps"`
+	TupUpdatedPS  float64 `json:"tup_updated_ps"`
+	TupDeletedPS  float64 `json:"tup_deleted_ps"`
+	BlksHitPct    float64 `json:"blks_hit_pct"`
+	DeadTuples    int64   `json:"dead_tuples"`
+	DBSizeBytes   int64   `json:"db_size_bytes"`
+}
+
+// CustomMetricValue holds a single named metric value from external input.
+type CustomMetricValue struct {
+	Name  string  `json:"name"`
+	Value float64 `json:"value"`
 }

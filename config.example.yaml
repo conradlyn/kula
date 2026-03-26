@@ -140,6 +140,75 @@ web:
       memory: 32768 # double the OWASP minimum
       threads: 4
 
+# Application monitoring
+# These modules appear under the "Applications" section in the dashboard.
+# Each module is independently enabled/disabled.
+applications:
+  # Nginx monitoring via the stub_status module
+  # Requires: nginx compiled with --with-http_stub_status_module
+  # Add to your nginx config:
+  #   location /status { stub_status; allow 127.0.0.1; deny all; }
+  nginx:
+    enabled: false
+    status_url: "http://localhost/status"
+
+  # Container monitoring (Docker / Podman)
+  # Discovery modes (logged at startup):
+  #   - "socket": uses the container runtime API for discovery + cgroups v2 for metrics
+  #   - "cgroups": fallback when no socket is available (no container name mapping)
+  # The socket_path is auto-detected by default; set it explicitly if using a
+  # non-standard location or rootless Podman.
+  containers:
+    enabled: true
+    # socket_path: "/var/run/docker.sock"
+    # Filter by container name or ID prefix. Empty = monitor all running containers.
+    # containers: ["my-app", "postgres-db"]
+
+  # Custom metrics via Unix socket
+  # Define chart groups with metric names, units, and Y-axis maxima.
+  # Kula creates a Unix socket at <storage_dir>/kula.sock to receive data.
+  #
+  # Send data from any script or program:
+  #   echo '{"custom":{"cpu_fans":[{"fan1":4423},{"fan2":8512}]}}' | socat - UNIX-CONNECT:/var/lib/kula/kula.sock
+  #
+  # Each group becomes a chart card. Each metric in the group becomes a line.
+  # custom:
+  #   cpu_fans:
+  #     - name: fan1
+  #       unit: RPM
+  #       max: 5000
+  #     - name: fan2
+  #       unit: RPM
+  #       max: 10000
+  #   room_temp:
+  #     - name: ambient
+  #       unit: °C
+  #       max: 50
+
+  # PostgreSQL monitoring
+  # Connects via lib/pq. Supports TCP and Unix socket.
+  # For Unix socket: set host to socket directory, port to 0.
+  #
+  # Quick setup — create a read-only monitoring user:
+  #   sudo -u postgres psql
+  #   CREATE ROLE kula_monitor WITH LOGIN PASSWORD 'changeme';
+  #   GRANT pg_monitor TO kula_monitor;
+  #   -- pg_monitor grants read access to pg_stat_*, pg_database_size, etc.
+  #   -- No table-level permissions needed.
+  #
+  # pg_hba.conf — add before any "reject" rules:
+  #   host    postgres    kula_monitor    127.0.0.1/32    scram-sha-256
+  #
+  # Then reload: sudo systemctl reload postgresql
+  postgres:
+    enabled: false
+    host: "localhost"
+    port: 5432
+    user: "kula_monitor"
+    password: ""
+    dbname: "postgres"
+    sslmode: "disable"
+
 # TUI settings
 tui:
   refresh_rate: 1s

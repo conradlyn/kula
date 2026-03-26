@@ -115,7 +115,7 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 	cfg.Web.Kernel = kernelVersion
 	cfg.Web.Arch = cpuArch
 	cfg.Collection.DebugLog = cfg.Web.Logging.Enabled && cfg.Web.Logging.Level == "debug"
-	coll := collector.New(cfg.Global, cfg.Collection, cfg.Storage.Directory)
+	coll := collector.New(cfg.Global, cfg.Collection, cfg.Applications, cfg.Storage.Directory)
 
 	store, err := storage.NewStore(cfg.Storage)
 	if err != nil {
@@ -129,7 +129,7 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 	if cfg.Web.Enabled {
 		port = cfg.Web.Port
 	}
-	if err := sandbox.Enforce(configPath, cfg.Storage.Directory, port); err != nil {
+	if err := sandbox.Enforce(configPath, cfg.Storage.Directory, port, cfg.Applications); err != nil {
 		log.Printf("Warning: Landlock sandbox not enforced: %v", err)
 	}
 
@@ -187,6 +187,7 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 	<-ctx.Done()
 
 	log.Println("Shutting down...")
+	coll.Stop()
 
 	if server != nil {
 		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -198,7 +199,7 @@ func runServe(cfg *config.Config, configPath string, osName, kernelVersion, cpuA
 }
 
 func runTUI(cfg *config.Config, osName, kernelVersion, cpuArch string) {
-	coll := collector.New(cfg.Global, cfg.Collection, cfg.Storage.Directory)
+	coll := collector.New(cfg.Global, cfg.Collection, cfg.Applications, cfg.Storage.Directory)
 	if err := tui.RunHeadless(coll, cfg.TUI.RefreshRate, osName, kernelVersion, cpuArch, version, cfg.Global.ShowSystemInfo); err != nil {
 		log.Fatalf("TUI error: %v", err)
 	}

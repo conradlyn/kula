@@ -14,8 +14,12 @@ package sandbox
 import (
 	"fmt"
 	"log"
+	"net/url"
 	"os"
 	"path/filepath"
+	"strconv"
+
+	"kula/internal/config"
 
 	"github.com/landlock-lsm/go-landlock/landlock"
 	llsyscall "github.com/landlock-lsm/go-landlock/landlock/syscall"
@@ -30,11 +34,17 @@ import (
 //
 // It restricts network access to only binding on the given TCP port.
 //
+// When application monitoring is enabled, additional rules are added:
+//   - Nginx: ConnectTCP to the status URL port (for HTTP GET)
+//   - Containers: ROFiles on the Docker/Podman Unix socket
+//   - PostgreSQL: ConnectTCP to the configured port, or RODirs for
+//     Unix socket directories
+//
 // This function should be called after config and storage are initialized
 // but before starting goroutines that serve requests.
 //
 // On kernels without Landlock support, this logs a warning and returns nil.
-func Enforce(configPath string, storageDir string, webPort int) error {
+func Enforce(configPath string, storageDir string, webPort int, appCfg config.ApplicationsConfig) error {
 	// Resolve paths to absolute to satisfy Landlock requirements
 	absConfigPath, err := filepath.Abs(configPath)
 	if err != nil {
@@ -60,6 +70,11 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 		// Config file: read-only
 		landlock.ROFiles(absConfigPath).IgnoreIfMissing(),
 
+		// Core system config for network resolution
+		landlock.ROFiles("/etc/hosts").IgnoreIfMissing(),
+		landlock.ROFiles("/etc/resolv.conf").IgnoreIfMissing(),
+		landlock.ROFiles("/etc/nsswitch.conf").IgnoreIfMissing(),
+
 		// Data storage: read-write access
 		landlock.RWDirs(absStorageDir),
 	}
@@ -72,6 +87,60 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 		}
 		netRules = []landlock.Rule{
 			landlock.BindTCP(uint16(webPort)),
+		}
+	}
+
+	// Application monitoring rules
+	var appInfo []string
+
+	// Nginx: allow outbound TCP connection to the status URL port
+	if appCfg.Nginx.Enabled && appCfg.Nginx.StatusURL != "" {
+		if u, err := url.Parse(appCfg.Nginx.StatusURL); err == nil {
+			port := 80
+			if u.Port() != "" {
+				if p, err := strconv.Atoi(u.Port()); err == nil {
+					port = p
+				}
+			} else if u.Scheme == "https" {
+				port = 443
+			}
+			netRules = append(netRules, landlock.ConnectTCP(uint16(port)))
+			appInfo = append(appInfo, fmt.Sprintf("nginx:connect-tcp/%d", port))
+		}
+	}
+
+	// Containers: allow read access to the runtime socket
+	if appCfg.Containers.Enabled {
+		socketPath := appCfg.Containers.SocketPath
+		if socketPath == "" {
+			// Auto-detect: try known paths
+			for _, p := range []string{
+				"/var/run/docker.sock",
+				"/run/docker.sock",
+				"/var/run/podman/podman.sock",
+				"/run/podman/podman.sock",
+			} {
+				if _, err := os.Stat(p); err == nil {
+					socketPath = p
+					break
+				}
+			}
+		}
+		if socketPath != "" {
+			fsRules = append(fsRules, landlock.RWFiles(socketPath).IgnoreIfMissing())
+			appInfo = append(appInfo, fmt.Sprintf("containers:ro(%s)", socketPath))
+		}
+	}
+
+	// PostgreSQL: allow outbound TCP or Unix socket access
+	if appCfg.Postgres.Enabled {
+		if appCfg.Postgres.Port > 0 {
+			netRules = append(netRules, landlock.ConnectTCP(uint16(appCfg.Postgres.Port)))
+			appInfo = append(appInfo, fmt.Sprintf("postgres:connect-tcp/%d", appCfg.Postgres.Port))
+		} else if appCfg.Postgres.Host != "" {
+			// Unix socket mode: host is the socket directory
+			fsRules = append(fsRules, landlock.RWDirs(appCfg.Postgres.Host).IgnoreIfMissing())
+			appInfo = append(appInfo, fmt.Sprintf("postgres:ro(%s)", appCfg.Postgres.Host))
 		}
 	}
 
@@ -97,7 +166,7 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 	}
 
 	var netStatus string
-	// Network restrictions (BindTCP) require ABI v4+ (kernel 6.7+)
+	// Network restrictions (BindTCP/ConnectTCP) require ABI v4+ (kernel 6.7+)
 	if webPort == 0 {
 		netStatus = ", net: disabled"
 	} else if abi < 4 {
@@ -106,8 +175,13 @@ func Enforce(configPath string, storageDir string, webPort int) error {
 		netStatus = fmt.Sprintf(", net: bind TCP/%d", webPort)
 	}
 
-	log.Printf("Landlock sandbox enforced (ABI v%d, paths: /proc[ro] /sys[ro] %s[ro] %s[rw]%s)",
-		abi, absConfigPath, absStorageDir, netStatus)
+	var appStatus string
+	if len(appInfo) > 0 {
+		appStatus = fmt.Sprintf(", apps: %v", appInfo)
+	}
+
+	log.Printf("Landlock sandbox enforced (ABI v%d, paths: /proc[ro] /sys[ro] %s[ro] %s[rw]%s%s)",
+		abi, absConfigPath, absStorageDir, netStatus, appStatus)
 
 	return nil
 }

@@ -20,6 +20,11 @@ function _getSplitCards() {
     return Array.from(document.querySelectorAll('.chart-card[data-split-type]'));
 }
 
+// Returns all dynamically created app chart cards (nginx, containers, postgres, custom)
+function _getAppCards() {
+    return Array.from(document.querySelectorAll('.chart-card[data-app-chart]'));
+}
+
 export function toggleFocusMode() {
     const grids = document.querySelectorAll('.charts-grid');
     const btn = document.getElementById('btn-focus');
@@ -36,6 +41,7 @@ export function toggleFocusMode() {
             if (el) el.classList.remove('focus-visible', 'focus-selected');
         });
         _getSplitCards().forEach(card => card.classList.remove('focus-visible', 'focus-selected'));
+        _getAppCards().forEach(card => card.classList.remove('focus-visible', 'focus-selected'));
         removeFocusBar();
         localStorage.removeItem('kula_focus_visible');
         state.focusVisible = null;
@@ -51,6 +57,9 @@ export function toggleFocusMode() {
             if (el?.classList.contains('focus-selected')) selected.push(id);
         });
         _getSplitCards().forEach(card => {
+            if (card.classList.contains('focus-selected')) selected.push(card.id);
+        });
+        _getAppCards().forEach(card => {
             if (card.classList.contains('focus-selected')) selected.push(card.id);
         });
 
@@ -105,6 +114,11 @@ export function toggleFocusMode() {
             card.classList.toggle('focus-visible', isSelected && !isHidden);
             card.classList.remove('focus-selected');
         });
+        _getAppCards().forEach(card => {
+            const isSelected = selected.includes(card.id);
+            card.classList.toggle('focus-visible', isSelected);
+            card.classList.remove('focus-selected');
+        });
 
         if (localStorage.getItem('kula_focus_hide_gauges') === 'true') {
             document.getElementById('gauges-row')?.classList.add('focus-hidden');
@@ -148,6 +162,13 @@ export function toggleFocusMode() {
             }
         }
     });
+    _getAppCards().forEach(card => {
+        if (state.focusVisible?.includes(card.id)) {
+            card.classList.add('focus-selected');
+        } else {
+            card.classList.remove('focus-selected');
+        }
+    });
 
     showFocusBar();
 
@@ -164,6 +185,10 @@ export function toggleFocusMode() {
             card._focusClick = () => card.classList.toggle('focus-selected');
             card.addEventListener('click', card._focusClick);
         }
+    });
+    _getAppCards().forEach(card => {
+        card._focusClick = () => card.classList.toggle('focus-selected');
+        card.addEventListener('click', card._focusClick);
     });
 }
 
@@ -257,6 +282,12 @@ export function removeFocusBar() {
             delete card._focusClick;
         }
     });
+    _getAppCards().forEach(card => {
+        if (card._focusClick) {
+            card.removeEventListener('click', card._focusClick);
+            delete card._focusClick;
+        }
+    });
 }
 
 export function applyStoredFocusMode() {
@@ -297,6 +328,10 @@ export function applyStoredFocusMode() {
             const isHidden = card.classList.contains('hidden');
             card.classList.toggle('focus-visible', isSelected && !isHidden);
         });
+        _getAppCards().forEach(card => {
+            const isSelected = state.focusVisible.includes(card.id);
+            card.classList.toggle('focus-visible', isSelected);
+        });
 
         if (localStorage.getItem('kula_focus_hide_gauges') === 'true') {
             document.getElementById('gauges-row')?.classList.add('focus-hidden');
@@ -315,6 +350,8 @@ export function combineGrids() {
     });
     // Also move split cards into the main grid for a unified focus layout
     _getSplitCards().forEach(card => mainGrid.appendChild(card));
+    // Move app cards (nginx, containers, postgres, custom) into the main grid
+    _getAppCards().forEach(card => mainGrid.appendChild(card));
 }
 
 export function restoreGrids() {
@@ -355,5 +392,11 @@ export function restoreGrids() {
             insertAfter.insertAdjacentElement('afterend', card);
             insertAfter = card;
         }
+    }
+
+    // Restore app cards back to applications-grid
+    const appsGrid = document.getElementById('applications-grid');
+    if (appsGrid) {
+        _getAppCards().forEach(card => appsGrid.appendChild(card));
     }
 }

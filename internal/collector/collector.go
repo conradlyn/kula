@@ -1,8 +1,10 @@
 package collector
 
 import (
+	"context"
 	"kula/internal/config"
 	"log"
+	"net/http"
 	"sync"
 	"time"
 )
@@ -19,6 +21,7 @@ type Collector struct {
 	mu        sync.RWMutex
 	cfg       config.GlobalConfig
 	collCfg   config.CollectionConfig
+	appCfg    config.ApplicationsConfig
 	latest    *Sample
 	prevCPU   []cpuRaw
 	prevNet   map[string]netRaw
@@ -30,23 +33,87 @@ type Collector struct {
 	storageDir string
 	prevTime  time.Time
 	debugDone bool // set after the first Collect(); suppresses repeated debug logs
+
+	// Application monitoring state
+	nginxClient    *http.Client
+	prevNginx      nginxRaw
+	containerColl  *containerCollector
+	pgCollector    *postgresCollector
+	customColl     *customCollector
+	appCtx         context.Context
+	appCancel      context.CancelFunc
 }
 
-func New(cfg config.GlobalConfig, collCfg config.CollectionConfig, storageDir string) *Collector {
-	return &Collector{
+func New(cfg config.GlobalConfig, collCfg config.CollectionConfig, appCfg config.ApplicationsConfig, storageDir string) *Collector {
+	ctx, cancel := context.WithCancel(context.Background())
+	c := &Collector{
 		cfg:        cfg,
 		collCfg:    collCfg,
+		appCfg:     appCfg,
 		storageDir: storageDir,
 		prevNet:    make(map[string]netRaw),
 		prevDisk:   make(map[string]diskRaw),
 		prevEnergy: make(map[string]uint64),
+		appCtx:     ctx,
+		appCancel:  cancel,
 	}
+
+	// Initialize container collector if enabled
+	if appCfg.Containers.Enabled {
+		cc := newContainerCollector(ContainersCollectorConfig{
+			Enabled:    true,
+			SocketPath: appCfg.Containers.SocketPath,
+			Containers: appCfg.Containers.Containers,
+			DebugLog:   collCfg.DebugLog,
+		})
+		c.containerColl = cc
+		cc.Start(ctx, collCfg.Interval)
+		log.Printf("[containers] monitoring enabled (mode: %s)", cc.mode)
+	}
+
+	// Initialize postgres collector if enabled
+	if appCfg.Postgres.Enabled {
+		c.pgCollector = newPostgresCollector(
+			appCfg.Postgres.Host,
+			appCfg.Postgres.Port,
+			appCfg.Postgres.User,
+			appCfg.Postgres.Password,
+			appCfg.Postgres.DBName,
+			appCfg.Postgres.SSLMode,
+			collCfg.DebugLog,
+		)
+		log.Printf("[postgres] monitoring enabled for database %q", appCfg.Postgres.DBName)
+	}
+
+	if appCfg.Nginx.Enabled {
+		log.Printf("[nginx] monitoring enabled at %s", appCfg.Nginx.StatusURL)
+	}
+
+	// Initialize custom metrics collector if any groups are configured
+	if len(appCfg.Custom) > 0 {
+		sockPath := storageDir + "/kula.sock"
+		cc, err := newCustomCollector(ctx, sockPath, appCfg.Custom, collCfg.DebugLog)
+		if err != nil {
+			log.Printf("[custom] failed to start: %v", err)
+		} else {
+			c.customColl = cc
+		}
+	}
+
+	return c
 }
 
 // debugf logs a formatted message only when web.logging.level = "debug" is set
 // AND only during the first collection cycle. Subsequent calls are no-ops.
 func (c *Collector) debugf(format string, args ...any) {
 	if c.collCfg.DebugLog && !c.debugDone {
+		log.Printf(format, args...)
+	}
+}
+
+// appErrorf logs an application error only once at startup — regardless of debug mode.
+func (c *Collector) appErrorf(format string, args ...any) {
+	if !c.debugDone {
 		log.Printf(format, args...)
 	}
 }
@@ -80,6 +147,7 @@ func (c *Collector) Collect() *Sample {
 	s.Process = collectProcesses()
 	s.Self = c.collectSelf(elapsed)
 	s.GPU = c.collectGPUs(elapsed)
+	s.Apps = c.collectApps(elapsed)
 
 	c.mu.Lock()
 	c.latest = s
@@ -98,4 +166,45 @@ func (c *Collector) Latest() *Sample {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return c.latest
+}
+
+// Stop cleans up application monitoring resources.
+func (c *Collector) Stop() {
+	if c.appCancel != nil {
+		c.appCancel()
+	}
+	if c.pgCollector != nil {
+		c.pgCollector.Close()
+	}
+	if c.customColl != nil {
+		c.customColl.Close()
+	}
+}
+
+// collectApps gathers metrics from all enabled application monitors.
+func (c *Collector) collectApps(elapsed float64) ApplicationsStats {
+	var apps ApplicationsStats
+
+	if c.appCfg.Nginx.Enabled {
+		apps.Nginx = c.collectNginx(elapsed)
+	}
+
+	if c.containerColl != nil {
+		apps.Containers = c.containerColl.Latest()
+	}
+
+	if c.appCfg.Postgres.Enabled {
+		apps.Postgres = c.collectPostgres(elapsed)
+	}
+
+	if c.customColl != nil {
+		apps.Custom = c.customColl.Latest()
+	}
+
+	return apps
+}
+
+// CustomConfig returns the custom metric configurations for use by the API layer.
+func (c *Collector) CustomConfig() map[string][]config.CustomMetricConfig {
+	return c.appCfg.Custom
 }

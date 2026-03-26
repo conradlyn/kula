@@ -12,11 +12,12 @@ import (
 )
 
 type Config struct {
-	Global     GlobalConfig     `yaml:"global"`
-	Collection CollectionConfig `yaml:"collection"`
-	Storage    StorageConfig    `yaml:"storage"`
-	Web        WebConfig        `yaml:"web"`
-	TUI        TUIConfig        `yaml:"tui"`
+	Global       GlobalConfig       `yaml:"global"`
+	Collection   CollectionConfig   `yaml:"collection"`
+	Storage      StorageConfig      `yaml:"storage"`
+	Web          WebConfig          `yaml:"web"`
+	Applications ApplicationsConfig `yaml:"applications"`
+	TUI          TUIConfig          `yaml:"tui"`
 }
 
 type GlobalConfig struct {
@@ -127,6 +128,54 @@ type TUIConfig struct {
 	RefreshRate time.Duration `yaml:"refresh_rate"`
 }
 
+// ApplicationsConfig groups monitoring modules for external applications.
+type ApplicationsConfig struct {
+	Nginx      NginxConfig                    `yaml:"nginx"`
+	Containers ContainersConfig               `yaml:"containers"`
+	Postgres   PostgresConfig                 `yaml:"postgres"`
+	Custom     map[string][]CustomMetricConfig `yaml:"custom"`
+}
+
+// CustomMetricConfig defines a single metric line within a custom chart group.
+// Multiple metrics with different names form separate lines in the same chart.
+type CustomMetricConfig struct {
+	Name string  `yaml:"name"`
+	Unit string  `yaml:"unit"`
+	Max  float64 `yaml:"max"`
+}
+
+// NginxConfig controls monitoring via the nginx stub_status module.
+// The status_url should point to the stub_status endpoint, e.g.
+// http://localhost/status
+type NginxConfig struct {
+	Enabled   bool   `yaml:"enabled"`
+	StatusURL string `yaml:"status_url"`
+}
+
+// ContainersConfig controls Docker/Podman container monitoring.
+// Discovery uses the container runtime API socket. If the socket is
+// unavailable, it falls back to cgroups-based discovery (without container
+// name mapping). The active mode is logged at startup.
+type ContainersConfig struct {
+	Enabled    bool     `yaml:"enabled"`
+	SocketPath string   `yaml:"socket_path"` // default: auto-detect docker/podman
+	Containers []string `yaml:"containers"`  // filter by name/id; empty = all
+}
+
+// PostgresConfig controls PostgreSQL database monitoring.
+// Connects via database/sql + lib/pq. Supports both TCP and Unix socket.
+// For Unix socket connections, set host to the socket directory
+// (e.g. /var/run/postgresql) and leave port as 0.
+type PostgresConfig struct {
+	Enabled  bool   `yaml:"enabled"`
+	Host     string `yaml:"host"`
+	Port     int    `yaml:"port"`
+	User     string `yaml:"user"`
+	Password string `yaml:"password"`
+	DBName   string `yaml:"dbname"`
+	SSLMode  string `yaml:"sslmode"`
+}
+
 func isWritable(dir string) bool {
 	f, err := os.CreateTemp(dir, ".kula-write-test-*")
 	if err != nil {
@@ -191,6 +240,24 @@ func DefaultConfig() *Config {
 			},
 			MaxWebsocketConns:      100,
 			MaxWebsocketConnsPerIP: 5,
+		},
+		Applications: ApplicationsConfig{
+			Nginx: NginxConfig{
+				Enabled:   false,
+				StatusURL: "http://localhost/status",
+			},
+			Containers: ContainersConfig{
+				Enabled: true,
+				// SocketPath empty = auto-detect: try docker, then podman
+			},
+			Postgres: PostgresConfig{
+				Enabled: false,
+				Host:    "localhost",
+				Port:    5432,
+				User:    "kula_monitor",
+				DBName:  "postgres",
+				SSLMode: "disable",
+			},
 		},
 		TUI: TUIConfig{
 			RefreshRate: time.Second,

@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"kula/internal/collector"
 	"math"
+	"sort"
 	"sync"
 	"time"
 )
@@ -385,6 +386,98 @@ func appendVariable(buf []byte, s *collector.Sample) ([]byte, error) {
 		buf = appendF32(buf, g.PowerW)
 	}
 
+	// ---- Application metrics ----
+
+	// Nginx (1-byte presence + 52-byte fixed block when present)
+	if s.Apps.Nginx != nil {
+		buf = append(buf, 1)
+		n := s.Apps.Nginx
+		var nb [52]byte
+		binary.LittleEndian.PutUint32(nb[0:], uint32(int32(n.ActiveConnections)))
+		binary.LittleEndian.PutUint64(nb[4:], n.Accepts)
+		binary.LittleEndian.PutUint64(nb[12:], n.Handled)
+		binary.LittleEndian.PutUint64(nb[20:], n.Requests)
+		putF32(nb[28:], n.AcceptsPS)
+		putF32(nb[32:], n.HandledPS)
+		putF32(nb[36:], n.RequestsPS)
+		binary.LittleEndian.PutUint32(nb[40:], uint32(int32(n.Reading)))
+		binary.LittleEndian.PutUint32(nb[44:], uint32(int32(n.Writing)))
+		binary.LittleEndian.PutUint32(nb[48:], uint32(int32(n.Waiting)))
+		buf = append(buf, nb[:]...)
+	} else {
+		buf = append(buf, 0)
+	}
+
+	// Containers (uint16 count + variable per container)
+	ctCount := len(s.Apps.Containers)
+	if ctCount > 65535 {
+		ctCount = 65535
+	}
+	buf = appendUint16(buf, uint16(ctCount))
+	for _, ct := range s.Apps.Containers[:ctCount] {
+		if buf, err = appendStr(buf, ct.ID); err != nil {
+			return buf, fmt.Errorf("container id: %w", err)
+		}
+		if buf, err = appendStr(buf, ct.Name); err != nil {
+			return buf, fmt.Errorf("container name: %w", err)
+		}
+		buf = appendF32(buf, ct.CPUPct)
+		buf = appendUint64(buf, ct.MemUsed)
+		buf = appendUint64(buf, ct.MemLimit)
+		buf = appendF32(buf, ct.MemPct)
+		buf = appendF32(buf, ct.NetRxBPS)
+		buf = appendF32(buf, ct.NetTxBPS)
+		buf = appendF32(buf, ct.DiskRBPS)
+		buf = appendF32(buf, ct.DiskWBPS)
+	}
+
+	// PostgreSQL (1-byte presence + 56-byte fixed block when present)
+	if s.Apps.Postgres != nil {
+		buf = append(buf, 1)
+		pg := s.Apps.Postgres
+		var pb [56]byte
+		binary.LittleEndian.PutUint32(pb[0:], uint32(int32(pg.ActiveConns)))
+		binary.LittleEndian.PutUint32(pb[4:], uint32(int32(pg.IdleConns)))
+		binary.LittleEndian.PutUint32(pb[8:], uint32(int32(pg.MaxConns)))
+		putF32(pb[12:], pg.TxCommitPS)
+		putF32(pb[16:], pg.TxRollbackPS)
+		putF32(pb[20:], pg.TupFetchedPS)
+		putF32(pb[24:], pg.TupInsertedPS)
+		putF32(pb[28:], pg.TupUpdatedPS)
+		putF32(pb[32:], pg.TupDeletedPS)
+		putF32(pb[36:], pg.BlksHitPct)
+		binary.LittleEndian.PutUint64(pb[40:], uint64(pg.DeadTuples))
+		binary.LittleEndian.PutUint64(pb[48:], uint64(pg.DBSizeBytes))
+		buf = append(buf, pb[:]...)
+	} else {
+		buf = append(buf, 0)
+	}
+
+	// Custom metrics (uint16 group count, sorted keys for deterministic encoding)
+	customKeys := make([]string, 0, len(s.Apps.Custom))
+	for k := range s.Apps.Custom {
+		customKeys = append(customKeys, k)
+	}
+	sort.Strings(customKeys)
+	buf = appendUint16(buf, uint16(len(customKeys)))
+	for _, group := range customKeys {
+		metrics := s.Apps.Custom[group]
+		if buf, err = appendStr(buf, group); err != nil {
+			return buf, fmt.Errorf("custom group name: %w", err)
+		}
+		mCount := len(metrics)
+		if mCount > 65535 {
+			mCount = 65535
+		}
+		buf = appendUint16(buf, uint16(mCount))
+		for _, m := range metrics[:mCount] {
+			if buf, err = appendStr(buf, m.Name); err != nil {
+				return buf, fmt.Errorf("custom metric name: %w", err)
+			}
+			buf = appendF32(buf, m.Value)
+		}
+	}
+
 	return buf, nil
 }
 
@@ -713,6 +806,126 @@ func decodeVariable(data []byte, s *collector.Sample) (int, error) {
 		g.LoadPct = getF32(data[off:]); off += 4
 		g.PowerW = getF32(data[off:]); off += 4
 		s.GPU = append(s.GPU, g)
+	}
+
+	// ---- Application metrics (absent in older records) ----
+	if len(data)-off < 1 {
+		return off, nil
+	}
+
+	// Nginx
+	nginxPresent := data[off]; off++
+	if nginxPresent != 0 {
+		if err := need(52, "nginx fields"); err != nil {
+			return off, err
+		}
+		ng := &collector.NginxStats{}
+		ng.ActiveConnections = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		ng.Accepts = binary.LittleEndian.Uint64(data[off:]); off += 8
+		ng.Handled = binary.LittleEndian.Uint64(data[off:]); off += 8
+		ng.Requests = binary.LittleEndian.Uint64(data[off:]); off += 8
+		ng.AcceptsPS = getF32(data[off:]); off += 4
+		ng.HandledPS = getF32(data[off:]); off += 4
+		ng.RequestsPS = getF32(data[off:]); off += 4
+		ng.Reading = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		ng.Writing = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		ng.Waiting = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		s.Apps.Nginx = ng
+	}
+
+	// Containers
+	if err := need(2, "container count"); err != nil {
+		return off, err
+	}
+	numContainers := int(binary.LittleEndian.Uint16(data[off:])); off += 2
+	if numContainers > 0 {
+		s.Apps.Containers = make([]collector.ContainerStats, 0, numContainers)
+	}
+	for i := 0; i < numContainers; i++ {
+		var ct collector.ContainerStats
+		id, n, err := getStr(data[off:])
+		if err != nil {
+			return off, fmt.Errorf("container id: %w", err)
+		}
+		off += n
+		ct.ID = id
+		ctName, n2, err := getStr(data[off:])
+		if err != nil {
+			return off, fmt.Errorf("container name: %w", err)
+		}
+		off += n2
+		ct.Name = ctName
+		if err := need(4+8+8+4*5, "container fields"); err != nil {
+			return off, err
+		}
+		ct.CPUPct = getF32(data[off:]); off += 4
+		ct.MemUsed = binary.LittleEndian.Uint64(data[off:]); off += 8
+		ct.MemLimit = binary.LittleEndian.Uint64(data[off:]); off += 8
+		ct.MemPct = getF32(data[off:]); off += 4
+		ct.NetRxBPS = getF32(data[off:]); off += 4
+		ct.NetTxBPS = getF32(data[off:]); off += 4
+		ct.DiskRBPS = getF32(data[off:]); off += 4
+		ct.DiskWBPS = getF32(data[off:]); off += 4
+		s.Apps.Containers = append(s.Apps.Containers, ct)
+	}
+
+	// PostgreSQL
+	if err := need(1, "postgres presence"); err != nil {
+		return off, err
+	}
+	pgPresent := data[off]; off++
+	if pgPresent != 0 {
+		if err := need(56, "postgres fields"); err != nil {
+			return off, err
+		}
+		pg := &collector.PostgresStats{}
+		pg.ActiveConns = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		pg.IdleConns = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		pg.MaxConns = int(int32(binary.LittleEndian.Uint32(data[off:]))); off += 4
+		pg.TxCommitPS = getF32(data[off:]); off += 4
+		pg.TxRollbackPS = getF32(data[off:]); off += 4
+		pg.TupFetchedPS = getF32(data[off:]); off += 4
+		pg.TupInsertedPS = getF32(data[off:]); off += 4
+		pg.TupUpdatedPS = getF32(data[off:]); off += 4
+		pg.TupDeletedPS = getF32(data[off:]); off += 4
+		pg.BlksHitPct = getF32(data[off:]); off += 4
+		pg.DeadTuples = int64(binary.LittleEndian.Uint64(data[off:])); off += 8
+		pg.DBSizeBytes = int64(binary.LittleEndian.Uint64(data[off:])); off += 8
+		s.Apps.Postgres = pg
+	}
+
+	// Custom metrics
+	if err := need(2, "custom group count"); err != nil {
+		return off, err
+	}
+	numGroups := int(binary.LittleEndian.Uint16(data[off:])); off += 2
+	if numGroups > 0 {
+		s.Apps.Custom = make(map[string][]collector.CustomMetricValue, numGroups)
+	}
+	for i := 0; i < numGroups; i++ {
+		groupName, gn, err := getStr(data[off:])
+		if err != nil {
+			return off, fmt.Errorf("custom group name: %w", err)
+		}
+		off += gn
+		if err := need(2, "custom metric count"); err != nil {
+			return off, err
+		}
+		mCount := int(binary.LittleEndian.Uint16(data[off:])); off += 2
+		metrics := make([]collector.CustomMetricValue, 0, mCount)
+		for j := 0; j < mCount; j++ {
+			mName, mn, err := getStr(data[off:])
+			if err != nil {
+				return off, fmt.Errorf("custom metric name: %w", err)
+			}
+			off += mn
+			if err := need(4, "custom metric value"); err != nil {
+				return off, err
+			}
+			val := getF32(data[off:]); off += 4
+			metrics = append(metrics, collector.CustomMetricValue{Name: mName, Value: val})
+		}
+		s.Apps.Custom[groupName] = metrics
 	}
 
 	return off, nil

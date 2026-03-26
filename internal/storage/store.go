@@ -622,6 +622,27 @@ func (s *Store) aggregateSamples(samples []*collector.Sample, dur time.Duration)
 		avg.Disks.Devices = make([]collector.DiskDevice, len(last.Disks.Devices))
 		copy(avg.Disks.Devices, last.Disks.Devices)
 	}
+	// Deep-copy Apps to avoid sharing pointers with the original sample.
+	if last.Apps.Nginx != nil {
+		ngCopy := *last.Apps.Nginx
+		avg.Apps.Nginx = &ngCopy
+	}
+	if len(last.Apps.Containers) > 0 {
+		avg.Apps.Containers = make([]collector.ContainerStats, len(last.Apps.Containers))
+		copy(avg.Apps.Containers, last.Apps.Containers)
+	}
+	if last.Apps.Postgres != nil {
+		pgCopy := *last.Apps.Postgres
+		avg.Apps.Postgres = &pgCopy
+	}
+	if len(last.Apps.Custom) > 0 {
+		avg.Apps.Custom = make(map[string][]collector.CustomMetricValue, len(last.Apps.Custom))
+		for k, v := range last.Apps.Custom {
+			cv := make([]collector.CustomMetricValue, len(v))
+			copy(cv, v)
+			avg.Apps.Custom[k] = cv
+		}
+	}
 
 	var minS, maxS *collector.Sample
 
@@ -720,6 +741,108 @@ func (s *Store) aggregateSamples(samples []*collector.Sample, dur time.Duration)
 				avg.Disks.Devices[i].WriteBytesPS = roundF(wBpsSum / float64(count))
 				avg.Disks.Devices[i].ReadsPerSec = roundF(rIopsSum / float64(count))
 				avg.Disks.Devices[i].WritesPerSec = roundF(wIopsSum / float64(count))
+			}
+		}
+
+		// ---- Average App metrics rates ----
+
+		// Nginx rates
+		if avg.Apps.Nginx != nil {
+			var accPS, handPS, reqPS float64
+			count := 0
+			for _, s := range samples {
+				if s.Apps.Nginx != nil {
+					accPS += s.Apps.Nginx.AcceptsPS
+					handPS += s.Apps.Nginx.HandledPS
+					reqPS += s.Apps.Nginx.RequestsPS
+					count++
+				}
+			}
+			if count > 0 {
+				fC := float64(count)
+				avg.Apps.Nginx.AcceptsPS = roundF(accPS / fC)
+				avg.Apps.Nginx.HandledPS = roundF(handPS / fC)
+				avg.Apps.Nginx.RequestsPS = roundF(reqPS / fC)
+			}
+		}
+
+		// Container rates (match by ID)
+		for i := range avg.Apps.Containers {
+			ct := &avg.Apps.Containers[i]
+			var cpuSum, memPctSum, rxSum, txSum, drSum, dwSum float64
+			count := 0
+			for _, s := range samples {
+				for _, sc := range s.Apps.Containers {
+					if sc.ID == ct.ID {
+						cpuSum += sc.CPUPct
+						memPctSum += sc.MemPct
+						rxSum += sc.NetRxBPS
+						txSum += sc.NetTxBPS
+						drSum += sc.DiskRBPS
+						dwSum += sc.DiskWBPS
+						count++
+						break
+					}
+				}
+			}
+			if count > 0 {
+				fC := float64(count)
+				ct.CPUPct = roundF(cpuSum / fC)
+				ct.MemPct = roundF(memPctSum / fC)
+				ct.NetRxBPS = roundF(rxSum / fC)
+				ct.NetTxBPS = roundF(txSum / fC)
+				ct.DiskRBPS = roundF(drSum / fC)
+				ct.DiskWBPS = roundF(dwSum / fC)
+			}
+		}
+
+		// Postgres rates
+		if avg.Apps.Postgres != nil {
+			var commitPS, rollPS, fetchPS, insPS, updPS, delPS, hitPct float64
+			count := 0
+			for _, s := range samples {
+				if s.Apps.Postgres != nil {
+					commitPS += s.Apps.Postgres.TxCommitPS
+					rollPS += s.Apps.Postgres.TxRollbackPS
+					fetchPS += s.Apps.Postgres.TupFetchedPS
+					insPS += s.Apps.Postgres.TupInsertedPS
+					updPS += s.Apps.Postgres.TupUpdatedPS
+					delPS += s.Apps.Postgres.TupDeletedPS
+					hitPct += s.Apps.Postgres.BlksHitPct
+					count++
+				}
+			}
+			if count > 0 {
+				fC := float64(count)
+				avg.Apps.Postgres.TxCommitPS = roundF(commitPS / fC)
+				avg.Apps.Postgres.TxRollbackPS = roundF(rollPS / fC)
+				avg.Apps.Postgres.TupFetchedPS = roundF(fetchPS / fC)
+				avg.Apps.Postgres.TupInsertedPS = roundF(insPS / fC)
+				avg.Apps.Postgres.TupUpdatedPS = roundF(updPS / fC)
+				avg.Apps.Postgres.TupDeletedPS = roundF(delPS / fC)
+				avg.Apps.Postgres.BlksHitPct = roundF(hitPct / fC)
+			}
+		}
+
+		// Custom metric values
+		for group, metrics := range avg.Apps.Custom {
+			for mi := range metrics {
+				var sum float64
+				count := 0
+				for _, s := range samples {
+					if sMetrics, ok := s.Apps.Custom[group]; ok {
+						for _, sm := range sMetrics {
+							if sm.Name == metrics[mi].Name {
+								sum += sm.Value
+								count++
+								break
+							}
+						}
+					}
+				}
+				if count > 0 {
+					avg.Apps.Custom[group][mi].Value = roundF(sum / float64(count))
+				}
 			}
 		}
 	} else {

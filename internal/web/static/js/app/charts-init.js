@@ -97,6 +97,30 @@ export function destroyAllCharts() {
             state.charts[key] = null;
         }
     });
+    // Destroy dynamic app charts and remove their DOM elements
+    destroyAppCharts();
+}
+
+// destroyAppCharts cleans up all dynamically created application chart
+// instances and their associated DOM elements from the applications grid.
+export function destroyAppCharts() {
+    Object.entries(state.containerCharts || {}).forEach(([key, chart]) => {
+        if (chart) chart.destroy();
+        document.getElementById(`card-${key}`)?.remove();
+    });
+    state.containerCharts = {};
+
+    Object.entries(state.customCharts || {}).forEach(([group, entry]) => {
+        if (entry?.chart) entry.chart.destroy();
+        document.getElementById(`card-custom-${group}`)?.remove();
+    });
+    state.customCharts = {};
+
+    // Remove dynamically created nginx/postgres cards
+    ['card-nginx-connections', 'card-nginx-requests', 'card-nginx-rw',
+     'card-pg-connections', 'card-pg-throughput', 'card-pg-buffers'].forEach(id => {
+        document.getElementById(id)?.remove();
+    });
 }
 
 export function initCharts() {
@@ -291,6 +315,9 @@ export function initCharts() {
         };
         state.charts.self.update('none');
     }
+
+    // Applications — nginx, containers, postgres, custom charts are all
+    // created dynamically in charts-data.js on first data arrival.
 }
 
 // ---- Set x-axis bounds for full time window ----
@@ -326,6 +353,11 @@ export function setChartTimeRange() {
     // Also apply to split charts
     Object.values(state.splitCharts).forEach(typeCharts => {
         Object.values(typeCharts).forEach(applyToChart);
+    });
+    // Also apply to dynamic app charts
+    Object.values(state.containerCharts || {}).forEach(applyToChart);
+    Object.values(state.customCharts || {}).forEach(entry => {
+        if (entry?.chart) applyToChart(entry.chart);
     });
 }
 
