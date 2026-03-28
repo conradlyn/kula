@@ -152,10 +152,19 @@ func (c *Collector) collectDisks(elapsed float64) DiskStats {
 		}
 
 		if prev, ok := c.prevDisk[name]; ok && elapsed > 0 {
-			dev.ReadsPerSec = round2(float64(cur.reads-prev.reads) / elapsed)
-			dev.WritesPerSec = round2(float64(cur.writes-prev.writes) / elapsed)
-			dev.ReadBytesPS = float64(cur.readSect-prev.readSect) * 512.0 / elapsed
-			dev.WriteBytesPS = float64(cur.writeSect-prev.writeSect) * 512.0 / elapsed
+			// Guard against uint64 underflow on counter reset
+			if cur.reads >= prev.reads {
+				dev.ReadsPerSec = round2(float64(cur.reads-prev.reads) / elapsed)
+			}
+			if cur.writes >= prev.writes {
+				dev.WritesPerSec = round2(float64(cur.writes-prev.writes) / elapsed)
+			}
+			if cur.readSect >= prev.readSect {
+				dev.ReadBytesPS = float64(cur.readSect-prev.readSect) * 512.0 / elapsed
+			}
+			if cur.writeSect >= prev.writeSect {
+				dev.WriteBytesPS = float64(cur.writeSect-prev.writeSect) * 512.0 / elapsed
+			}
 		}
 
 		dev.Temperature, dev.Sensors = c.getDiskTemperature(name)

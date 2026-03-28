@@ -15,8 +15,9 @@ type Sample struct {
 	System  SystemStats  `json:"sys"`
 	Process ProcessStats `json:"proc"`
 	Self    SelfStats    `json:"self"`
-	GPU     []GPUStats   `json:"gpu,omitempty"`
-	Apps    ApplicationsStats `json:"apps,omitempty"`
+	GPU     []GPUStats         `json:"gpu,omitempty"`
+	PSU     []PowerSupplyStats `json:"psu,omitempty"`
+	Apps    ApplicationsStats  `json:"apps,omitempty"`
 }
 
 // CPUStats holds per-core and total CPU usage percentages.
@@ -91,11 +92,12 @@ type NetInterface struct {
 }
 
 // TCPStats holds key TCP protocol counters.
-// CurrEstab is a gauge. InErrs and OutRsts are per-second rates (delta/elapsed).
+// CurrEstab is a gauge. InErrs, OutRsts, and Retrans are per-second rates (delta/elapsed).
 type TCPStats struct {
 	CurrEstab uint64  `json:"curr_estab"`
 	InErrs    float64 `json:"in_errs_ps"`
 	OutRsts   float64 `json:"out_rsts_ps"`
+	Retrans   float64 `json:"retrans_ps"`
 }
 
 type SocketStats struct {
@@ -247,6 +249,19 @@ type PostgresStats struct {
 
 	// Database size
 	DBSizeBytes int64 `json:"db_size_bytes"`
+}
+
+// PowerSupplyStats holds metrics for a single power supply (battery, mains adapter, UPS).
+type PowerSupplyStats struct {
+	Name       string  `json:"name"`
+	Type       string  `json:"type"`              // "Battery", "Mains", "UPS"
+	Status     string  `json:"status"`            // "Charging", "Discharging", "Full", "Not charging"
+	Capacity   int     `json:"capacity,omitempty"` // 0-100%
+	VoltageV   float64 `json:"voltage_v,omitempty"`
+	CurrentA   float64 `json:"current_a,omitempty"`
+	PowerW     float64 `json:"power_w,omitempty"`
+	EnergyWhNow  float64 `json:"energy_wh_now,omitempty"`
+	EnergyWhFull float64 `json:"energy_wh_full,omitempty"`
 }
 
 // CustomMetricValue holds a single named metric value from external input.

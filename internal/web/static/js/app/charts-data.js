@@ -66,10 +66,11 @@ function createAppChartCard(cardId, chartId, subtitleId, title, order) {
     return chartId;
 }
 
-// Helper: iterate all dynamic app chart instances (for utility functions).
+// Helper: iterate all dynamic chart instances (for utility functions).
 function forEachAppChart(fn) {
     Object.values(state.containerCharts || {}).forEach(chart => { if (chart) fn(chart); });
     Object.values(state.customCharts || {}).forEach(entry => { if (entry?.chart) fn(entry.chart); });
+    Object.values(state.psuCharts || {}).forEach(chart => { if (chart) fn(chart); });
 }
 
 // ---- Data Update ----
@@ -207,6 +208,7 @@ export function addSampleToCharts(item, ts) {
         state.charts.connections.data.datasets[3].data.push(point(s.net?.tcp?.curr_estab || 0));
         state.charts.connections.data.datasets[4].data.push(point(s.net?.tcp?.in_errs_ps || 0));
         state.charts.connections.data.datasets[5].data.push(point(s.net?.tcp?.out_rsts_ps || 0));
+        state.charts.connections.data.datasets[6].data.push(point(s.net?.tcp?.retrans_ps || 0));
     }
 
     // Disk I/O (selected device) — skip when split is active
@@ -379,6 +381,76 @@ export function addSampleToCharts(item, ts) {
         }
     }
 
+    // ---- Power Supply (batteries/UPS) — dynamic charts in system metrics grid ----
+    if (s.psu && s.psu.length > 0) {
+        for (const ps of s.psu) {
+            // Only chart batteries and UPS, skip Mains adapters
+            if (ps.type !== 'Battery' && ps.type !== 'UPS') continue;
+
+            const psuKey = `psu_${ps.name}`;
+            if (!state.psuCharts) state.psuCharts = {};
+
+            if (!state.psuCharts[psuKey]) {
+                const grid = document.getElementById('charts-grid');
+                if (grid) {
+                    const wrapper = document.createElement('div');
+                    wrapper.className = 'chart-card';
+                    wrapper.id = `card-${psuKey}`;
+                    const header = document.createElement('div');
+                    header.className = 'chart-header';
+                    const h3 = document.createElement('h3');
+                    h3.textContent = `${ps.type} \u2014 ${ps.name}`;
+                    const span = document.createElement('span');
+                    span.className = 'chart-subtitle';
+                    span.id = `${psuKey}-subtitle`;
+                    header.appendChild(h3);
+                    header.appendChild(span);
+                    const body = document.createElement('div');
+                    body.className = 'chart-body';
+                    const canvas = document.createElement('canvas');
+                    canvas.id = `chart-${psuKey}`;
+                    body.appendChild(canvas);
+                    wrapper.appendChild(header);
+                    wrapper.appendChild(body);
+                    grid.appendChild(wrapper);
+
+                    state.psuCharts[psuKey] = createTimeSeriesChart(`chart-${psuKey}`, [
+                        { label: 'Capacity %', borderColor: colors.green, backgroundColor: colors.greenAlpha, fill: true, data: [] },
+                        { label: 'Power W', borderColor: colors.orange, data: [], fill: false },
+                    ], { beginAtZero: true, max: 100, ticks: { callback: v => v + '%' } });
+
+                    // Add second y-axis for power
+                    if (state.psuCharts[psuKey]) {
+                        state.psuCharts[psuKey].data.datasets[1].yAxisID = 'y1';
+                        state.psuCharts[psuKey].options.scales.y1 = {
+                            position: 'right',
+                            beginAtZero: true,
+                            grid: { display: false },
+                            ticks: { callback: v => v.toFixed(1) + ' W' },
+                        };
+                        state.psuCharts[psuKey].update('none');
+                    }
+                }
+            }
+
+            const chart = state.psuCharts[psuKey];
+            if (chart) {
+                chart.data.datasets[0].data.push(point(ps.capacity || 0));
+                chart.data.datasets[1].data.push(point(ps.power_w || 0));
+                if (!state.loadingHistory) chart.update('none');
+            }
+
+            const sub = document.getElementById(`${psuKey}-subtitle`);
+            if (sub) {
+                const parts = [`${ps.capacity}%`];
+                if (ps.status) parts.push(ps.status);
+                if (ps.power_w > 0) parts.push(`${ps.power_w.toFixed(1)} W`);
+                if (ps.voltage_v > 0) parts.push(`${ps.voltage_v.toFixed(2)} V`);
+                sub.textContent = parts.join('  ');
+            }
+        }
+    }
+
     // ---- Applications (all charts created dynamically) ----
     let appsVisible = false;
     const seenContainers = new Set();
@@ -435,56 +507,73 @@ export function addSampleToCharts(item, ts) {
         }
     }
 
-    // Containers (dynamic charts, appended directly to grid)
+    // Containers (3 charts per container: CPU, Memory, I/O)
     if (s.apps?.containers?.length > 0) {
         appsVisible = true;
         for (const ct of s.apps.containers) {
-            const key = `container_${ct.id}`;
+            const base = `container_${ct.id}`;
+            const cpuKey = `${base}_cpu`;
+            const memKey = `${base}_mem`;
+            const ioKey  = `${base}_io`;
+            const label = ct.name || ct.id;
 
-            if (!state.containerCharts[key]) {
-                const label = ct.name || ct.id;
-                createAppChartCard(`card-${key}`, `chart-${key}`, `${key}-subtitle`, `Container \u2014 ${label}`, APP_ORDER_CONTAINERS);
-
-                const canvas = document.getElementById(`chart-${key}`);
-                const ctx = canvas?.getContext('2d');
-                if (ctx) {
-                    state.containerCharts[key] = new Chart(ctx, {
-                        type: 'line',
-                        data: {
-                            datasets: [
-                                { label: 'CPU %', borderColor: colors.blue, data: [], fill: false, yAxisID: 'y', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
-                                { label: 'Mem %', borderColor: colors.purple, data: [], fill: false, yAxisID: 'y', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
-                                { label: 'Net Rx B/s', borderColor: colors.green, data: [], fill: false, yAxisID: 'y1', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
-                                { label: 'Net Tx B/s', borderColor: colors.orange, data: [], fill: false, yAxisID: 'y1', pointRadius: 0, borderWidth: 1.5, tension: 0.2 },
-                            ]
-                        },
-                        options: {
-                            responsive: true, maintainAspectRatio: false, animation: false,
-                            interaction: { mode: 'index', intersect: false },
-                            plugins: { tooltip: { position: 'awayFromCursor' } },
-                            scales: {
-                                x: { type: 'time', display: true, time: { unit: 'minute' }, ticks: { maxTicksLimit: 6, maxRotation: 0, autoSkip: true } },
-                                y: { beginAtZero: true, position: 'left', title: { display: true, text: '%' } },
-                                y1: { beginAtZero: true, position: 'right', grid: { display: false }, ticks: { callback: v => formatBytesShort(v) + '/s' } },
-                            },
-                        }
-                    });
-                }
+            // CPU chart
+            if (!state.containerCharts[cpuKey]) {
+                createAppChartCard(`card-${cpuKey}`, `chart-${cpuKey}`, `${cpuKey}-subtitle`, `${label} \u2014 CPU`, APP_ORDER_CONTAINERS);
+                state.containerCharts[cpuKey] = createTimeSeriesChart(`chart-${cpuKey}`, [
+                    { label: 'CPU %', borderColor: colors.blue, backgroundColor: colors.blueAlpha, fill: true, data: [] },
+                ], { beginAtZero: true, ticks: { callback: v => v + '%' } });
             }
 
-            const chart = state.containerCharts[key];
-            if (chart) {
-                chart.data.datasets[0].data.push(point(ct.cpu_pct || 0));
-                chart.data.datasets[1].data.push(point(ct.mem_pct || 0));
-                chart.data.datasets[2].data.push(point(ct.net_rx_bps || 0));
-                chart.data.datasets[3].data.push(point(ct.net_tx_bps || 0));
-                if (!state.loadingHistory) chart.update('none');
+            // Memory chart (absolute bytes)
+            if (!state.containerCharts[memKey]) {
+                createAppChartCard(`card-${memKey}`, `chart-${memKey}`, `${memKey}-subtitle`, `${label} \u2014 Memory`, APP_ORDER_CONTAINERS + 1);
+                state.containerCharts[memKey] = createTimeSeriesChart(`chart-${memKey}`, [
+                    { label: 'Used', borderColor: colors.purple, backgroundColor: colors.purpleAlpha, fill: true, data: [] },
+                    { label: 'Limit', borderColor: colors.red, data: [], fill: false, borderDash: [4, 2] },
+                ], { beginAtZero: true, ticks: { callback: v => formatBytesShort(v) } });
             }
 
-            const sub = document.getElementById(`${key}-subtitle`);
-            if (sub) sub.textContent = `CPU: ${(ct.cpu_pct || 0).toFixed(1)}%  Mem: ${(ct.mem_pct || 0).toFixed(1)}%`;
+            // I/O chart (Net + Block combined)
+            if (!state.containerCharts[ioKey]) {
+                createAppChartCard(`card-${ioKey}`, `chart-${ioKey}`, `${ioKey}-subtitle`, `${label} \u2014 I/O`, APP_ORDER_CONTAINERS + 2);
+                state.containerCharts[ioKey] = createTimeSeriesChart(`chart-${ioKey}`, [
+                    { label: 'Net Rx', borderColor: colors.green, data: [], fill: false },
+                    { label: 'Net Tx', borderColor: colors.orange, data: [], fill: false },
+                    { label: 'Disk Read', borderColor: colors.cyan, data: [], fill: false, borderDash: [4, 2] },
+                    { label: 'Disk Write', borderColor: colors.pink, data: [], fill: false, borderDash: [4, 2] },
+                ], { beginAtZero: true, ticks: { callback: v => formatBytesShort(v) + '/s' } });
+            }
 
-            seenContainers.add(key);
+            // Push data points
+            const cpuChart = state.containerCharts[cpuKey];
+            if (cpuChart) {
+                cpuChart.data.datasets[0].data.push(point(ct.cpu_pct || 0));
+                if (!state.loadingHistory) cpuChart.update('none');
+            }
+
+            const memChart = state.containerCharts[memKey];
+            if (memChart) {
+                memChart.data.datasets[0].data.push(point(ct.mem_used || 0));
+                memChart.data.datasets[1].data.push(point(ct.mem_limit || 0));
+                if (!state.loadingHistory) memChart.update('none');
+            }
+
+            const ioChart = state.containerCharts[ioKey];
+            if (ioChart) {
+                ioChart.data.datasets[0].data.push(point(ct.net_rx_bps || 0));
+                ioChart.data.datasets[1].data.push(point(ct.net_tx_bps || 0));
+                ioChart.data.datasets[2].data.push(point(ct.disk_r_bps || 0));
+                ioChart.data.datasets[3].data.push(point(ct.disk_w_bps || 0));
+                if (!state.loadingHistory) ioChart.update('none');
+            }
+
+            const sub = document.getElementById(`${cpuKey}-subtitle`);
+            if (sub) sub.textContent = `CPU: ${(ct.cpu_pct || 0).toFixed(1)}%  Mem: ${formatBytesShort(ct.mem_used || 0)}`;
+
+            seenContainers.add(cpuKey);
+            seenContainers.add(memKey);
+            seenContainers.add(ioKey);
         }
     }
     // Hide container cards not in this sample

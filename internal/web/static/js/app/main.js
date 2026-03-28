@@ -15,6 +15,42 @@ import { setupHoverPause, setupChartActions } from './ui-actions.js';
 import { toggleFocusMode, applyStoredFocusMode } from './focus-mode.js';
 import { initSplitModule } from './split.js';
 
+function filterCharts(query) {
+    // Collect all section-title + charts-grid pairs
+    const sections = document.querySelectorAll('.section-title');
+    sections.forEach(title => {
+        const grid = title.nextElementSibling;
+        if (!grid || !grid.classList.contains('charts-grid')) return;
+
+        const cards = grid.querySelectorAll('.chart-card');
+        let anyVisible = false;
+        cards.forEach(card => {
+            const h3 = card.querySelector('h3');
+            const name = (h3?.textContent || '').toLowerCase();
+            // Also match subtitle text for richer search
+            const subtitle = card.querySelector('.chart-subtitle');
+            const subText = (subtitle?.textContent || '').toLowerCase();
+            const match = !query || name.includes(query) || subText.includes(query);
+            if (match) {
+                card.classList.remove('chart-search-hidden');
+                // Don't show cards that are legitimately hidden (e.g., GPU on non-GPU systems)
+                if (!card.classList.contains('hidden')) anyVisible = true;
+            } else {
+                card.classList.add('chart-search-hidden');
+            }
+        });
+
+        // Hide the section title + grid if nothing matches
+        if (query) {
+            title.classList.toggle('chart-search-hidden', !anyVisible);
+            grid.classList.toggle('chart-search-hidden', !anyVisible);
+        } else {
+            title.classList.remove('chart-search-hidden');
+            grid.classList.remove('chart-search-hidden');
+        }
+    });
+}
+
 async function init() {
     // Initialize i18n before everything else
     await i18n.init();
@@ -128,6 +164,15 @@ async function init() {
             document.querySelectorAll('.chart-settings-dropdown').forEach(d => d.classList.add('hidden'));
         }
     });
+
+    // Chart search/filter
+    const searchInput = document.getElementById('chart-search');
+    if (searchInput) {
+        searchInput.addEventListener('input', () => {
+            const query = searchInput.value.trim().toLowerCase();
+            filterCharts(query);
+        });
+    }
 
     document.addEventListener('kula-sync-pause', syncPauseState);
     document.addEventListener('kula-i18n-changed', updateAllCharts);

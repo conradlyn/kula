@@ -77,12 +77,17 @@ func (r cpuRaw) total() uint64 {
 }
 
 func calcCorePct(prev, cur cpuRaw) CPUCoreStats {
-	totalDelta := float64(cur.total() - prev.total())
-	if totalDelta == 0 {
-		return CPUCoreStats{}
+	curTotal := cur.total()
+	prevTotal := prev.total()
+	if curTotal <= prevTotal {
+		return CPUCoreStats{} // counter reset or no progress
 	}
+	totalDelta := float64(curTotal - prevTotal)
 
 	pct := func(prevVal, curVal uint64) float64 {
+		if curVal < prevVal {
+			return 0
+		}
 		return round2(float64(curVal-prevVal) / totalDelta * 100.0)
 	}
 

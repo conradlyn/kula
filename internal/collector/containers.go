@@ -405,7 +405,7 @@ func (cc *containerCollector) readCPUUsage(cgroupDir, id string, elapsed float64
 
 	cur := containerCPURaw{usageUsec: usageUsec}
 	var cpuPct float64
-	if prev, ok := cc.prevCPU[id]; ok && elapsed > 0 {
+	if prev, ok := cc.prevCPU[id]; ok && elapsed > 0 && cur.usageUsec >= prev.usageUsec {
 		deltaUsec := cur.usageUsec - prev.usageUsec
 		// Convert microseconds delta to percentage (100% = 1 full core)
 		cpuPct = round2(float64(deltaUsec) / (elapsed * 1_000_000) * 100)
@@ -475,8 +475,12 @@ func (cc *containerCollector) readNetIO(id string, elapsed float64) (rxBPS, txBP
 
 	cur := containerNetRaw{rxBytes: totalRx, txBytes: totalTx}
 	if prev, ok := cc.prevNet[id]; ok && elapsed > 0 {
-		rxBPS = round2(float64(cur.rxBytes-prev.rxBytes) / elapsed)
-		txBPS = round2(float64(cur.txBytes-prev.txBytes) / elapsed)
+		if cur.rxBytes >= prev.rxBytes {
+			rxBPS = round2(float64(cur.rxBytes-prev.rxBytes) / elapsed)
+		}
+		if cur.txBytes >= prev.txBytes {
+			txBPS = round2(float64(cur.txBytes-prev.txBytes) / elapsed)
+		}
 	}
 	cc.prevNet[id] = cur
 	return
@@ -505,8 +509,12 @@ func (cc *containerCollector) readDiskIO(cgroupDir, id string, elapsed float64) 
 
 	cur := containerDiskRaw{readBytes: totalRead, writeBytes: totalWrite}
 	if prev, ok := cc.prevDisk[id]; ok && elapsed > 0 {
-		rBPS = round2(float64(cur.readBytes-prev.readBytes) / elapsed)
-		wBPS = round2(float64(cur.writeBytes-prev.writeBytes) / elapsed)
+		if cur.readBytes >= prev.readBytes {
+			rBPS = round2(float64(cur.readBytes-prev.readBytes) / elapsed)
+		}
+		if cur.writeBytes >= prev.writeBytes {
+			wBPS = round2(float64(cur.writeBytes-prev.writeBytes) / elapsed)
+		}
 	}
 	cc.prevDisk[id] = cur
 	return

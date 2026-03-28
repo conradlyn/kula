@@ -116,6 +116,12 @@ export function destroyAppCharts() {
     });
     state.customCharts = {};
 
+    Object.entries(state.psuCharts || {}).forEach(([key, chart]) => {
+        if (chart) chart.destroy();
+        document.getElementById(`card-${key}`)?.remove();
+    });
+    state.psuCharts = {};
+
     // Remove dynamically created nginx/postgres cards
     ['card-nginx-connections', 'card-nginx-requests', 'card-nginx-rw',
      'card-pg-connections', 'card-pg-tps', 'card-pg-locks',
@@ -197,6 +203,7 @@ export function initCharts() {
         { label: i18n.t('established'), borderColor: colors.cyan, data: [], fill: false },
         { label: i18n.t('inerrs'), borderColor: colors.red, data: [], fill: false, borderDash: [4, 2] },
         { label: i18n.t('outrsts'), borderColor: colors.orange, data: [], fill: false, borderDash: [4, 2] },
+        { label: i18n.t('retrans'), borderColor: colors.pink, data: [], fill: false, borderDash: [4, 2] },
     ]);
 
     state.charts.diskio = createTimeSeriesChart('chart-disk-io', [
@@ -415,6 +422,7 @@ export function updateChartLabels() {
         state.charts.connections.data.datasets[3].label = i18n.t('established');
         state.charts.connections.data.datasets[4].label = i18n.t('inerrs');
         state.charts.connections.data.datasets[5].label = i18n.t('outrsts');
+        state.charts.connections.data.datasets[6].label = i18n.t('retrans');
     }
 
     if (state.charts.diskio) {

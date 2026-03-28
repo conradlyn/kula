@@ -147,6 +147,7 @@ func (c *Collector) Collect() *Sample {
 	s.Process = collectProcesses()
 	s.Self = c.collectSelf(elapsed)
 	s.GPU = c.collectGPUs(elapsed)
+	s.PSU = c.collectPSU()
 	s.Apps = c.collectApps(elapsed)
 
 	c.mu.Lock()

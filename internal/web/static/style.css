@@ -653,10 +653,13 @@ body {
     background: rgba(16, 185, 129, 0.25);
 }
 
-.time-custom {
+.time-custom-section {
     display: flex;
     align-items: center;
-    gap: 0.4rem;
+    gap: 0.5rem;
+    padding: 0.5rem 1.5rem;
+    border-bottom: 1px solid var(--border-color);
+    flex-wrap: wrap;
 }
 
 .time-input {
@@ -690,6 +693,35 @@ body.light-mode .time-input {
     font-size: 0.8rem;
     color: var(--text-muted);
     font-family: var(--font-mono);
+}
+
+/* ---- Chart Search (in header) ---- */
+.chart-search-input {
+    width: 140px;
+    padding: 0.3rem 0.6rem;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    background: var(--bg-secondary);
+    color: var(--text-primary);
+    font-size: 0.75rem;
+    font-family: var(--font-mono);
+    outline: none;
+    transition: border-color 0.2s, box-shadow 0.2s, width 0.2s;
+}
+
+.chart-search-input:focus {
+    width: 200px;
+    border-color: var(--border-glow);
+    box-shadow: var(--shadow-glow);
+}
+
+.chart-search-input::placeholder {
+    color: var(--text-muted);
+    opacity: 0.7;
+}
+
+.chart-search-hidden {
+    display: none !important;
 }
 
 /* ---- Sections ---- */

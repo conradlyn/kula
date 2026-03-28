@@ -67,6 +67,8 @@
                 <span id="hostname" class="hostname"></span>
             </div>
             <div class="header-right">
+                <!-- Chart search -->
+                <input type="text" id="chart-search" class="chart-search-input" data-i18n-placeholder="search_charts" placeholder="Search charts..." autocomplete="off" spellcheck="false">
                 <!-- Connection status -->
                 <span id="connection-status" class="status-dot connected" title="Connected"></span>
                 <!-- Pause/Resume -->
@@ -239,17 +241,19 @@
                     title="Custom range">📅</button>
                 <span id="loading-spinner" class="loading-spinner hidden" title="Loading history...">⏳</span>
             </div>
-            <div class="time-custom hidden" id="time-custom">
-                <input type="datetime-local" id="custom-from" class="time-input">
-                <span class="time-sep">→</span>
-                <input type="datetime-local" id="custom-to" class="time-input">
-                <button class="time-btn time-apply" id="btn-apply-custom" data-i18n="apply">Apply</button>
-            </div>
             <div class="time-info">
                 <span id="time-range-display" data-i18n="last_5_m">Last 5 minutes</span>
                 <span id="sampling-info" class="sampling-info"></span>
             </div>
         </section>
+
+        <!-- Custom time range picker (separate row for responsiveness) -->
+        <div class="time-custom-section hidden" id="time-custom">
+            <input type="datetime-local" id="custom-from" class="time-input">
+            <span class="time-sep">→</span>
+            <input type="datetime-local" id="custom-to" class="time-input">
+            <button class="time-btn time-apply" id="btn-apply-custom" data-i18n="apply">Apply</button>
+        </div>
 
         <!-- Charts grid -->
         <h2 class="section-title" data-i18n="system_metrics">System Metrics</h2>

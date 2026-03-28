@@ -36,6 +36,7 @@ export function toggleFocusMode() {
         document.querySelectorAll('.section-title').forEach(t => t.classList.remove('focus-active', 'focus-selecting', 'focus-hidden'));
         btn.classList.remove('focus-active');
         document.getElementById('gauges-row')?.classList.remove('focus-hidden');
+        document.getElementById('chart-search')?.classList.remove('focus-hidden');
         chartCardIds.forEach(id => {
             const el = document.getElementById(id);
             if (el) el.classList.remove('focus-visible', 'focus-selected');
@@ -123,6 +124,7 @@ export function toggleFocusMode() {
         if (localStorage.getItem('kula_focus_hide_gauges') === 'true') {
             document.getElementById('gauges-row')?.classList.add('focus-hidden');
         }
+        document.getElementById('chart-search')?.classList.add('focus-hidden');
 
         combineGrids();
         removeFocusBar();
@@ -255,6 +257,7 @@ export function showFocusBar() {
         document.querySelectorAll('.section-title').forEach(t => t.classList.remove('focus-selecting', 'focus-hidden'));
         document.getElementById('btn-focus').classList.remove('focus-active');
         document.getElementById('gauges-row')?.classList.remove('focus-hidden');
+        document.getElementById('chart-search')?.classList.remove('focus-hidden');
         removeFocusBar();
         restoreGrids();
     });
@@ -336,6 +339,7 @@ export function applyStoredFocusMode() {
         if (localStorage.getItem('kula_focus_hide_gauges') === 'true') {
             document.getElementById('gauges-row')?.classList.add('focus-hidden');
         }
+        document.getElementById('chart-search')?.classList.add('focus-hidden');
 
         combineGrids();
     }
