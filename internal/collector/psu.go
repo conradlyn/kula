@@ -31,7 +31,7 @@ func (c *Collector) collectPSU() []PowerSupplyStats {
 		}
 
 		// Capacity (0-100%)
-		if v, ok := readIntFile(filepath.Join(dir, "capacity")); ok {
+		if v, ok := readIntFile(filepath.Join(dir, "capacity")); ok && v >= 0 && v <= 100 {
 			ps.Capacity = int(v)
 		}
 
