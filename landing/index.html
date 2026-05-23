@@ -194,6 +194,18 @@
                         architectures.
                     </p>
                 </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="robot">🤖</span></div>
+                    <h3 data-i18n="feature_ai_title">AI Assistant</h3>
+                    <p data-i18n="feature_ai_desc">Optional local AI assistant powered by Ollama. Multi-session chats,
+                        per-chart analysis, and agentic tool calling — all inference runs locally.</p>
+                </div>
+                <div class="feature-card">
+                    <div class="feature-icon"><span role="img" aria-label="fire">🔥</span></div>
+                    <h3 data-i18n="feature_prom_title">Prometheus Metrics</h3>
+                    <p data-i18n="feature_prom_desc">Built-in Prometheus exporter endpoint. Scrape Kula's metrics into
+                        your existing observability stack with zero extra agents.</p>
+                </div>
             </div>
         </section>
 
@@ -269,6 +281,23 @@
                         <td data-i18n="metric_thermal">Thermal</td>
                         <td data-i18n="metric_thermal_details">CPU, GPU and Disk temperatures</td>
                     </tr>
+                    <tr>
+                        <td data-i18n="metric_battery">Battery</td>
+                        <td data-i18n="metric_battery_details">/sys/class/power_supply — power supply / battery status
+                        </td>
+                    </tr>
+                    <tr>
+                        <td data-i18n="metric_containers">Containers</td>
+                        <td data-i18n="metric_containers_details">Docker, podman, raw cgroups</td>
+                    </tr>
+                    <tr>
+                        <td data-i18n="metric_apps">Applications</td>
+                        <td data-i18n="metric_apps_details">PostgreSQL, nginx</td>
+                    </tr>
+                    <tr>
+                        <td data-i18n="metric_custom">Custom</td>
+                        <td data-i18n="metric_custom_details">Monitor anything with custom metrics</td>
+                    </tr>
                 </tbody>
             </table>
         </section>
@@ -292,7 +321,7 @@
         </div>
     </footer>
 
-    <script src="landing.js" integrity="sha384-oFYMfR/jPJWDoqlY0L7a/27jDvE67JhT5kR2g8V2E2kOCiVkXstOzoQVoW8Kvp4g"
+    <script src="landing.js" integrity="sha384-2TF5GA/de3JYOzorNSEqXl1tLr9USm4iTRAdvMYZZbp8L7vsgblS3V1xi2Z5/6Z0"
         crossorigin="anonymous"></script>
 </body>
 
