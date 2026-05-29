@@ -7,6 +7,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 Types of changes: Added, Changed, Deprecated, Removed, Fixed, Security
 
+## [0.17.2] - 2026-05-29
+
+### Changed
+
+- Performance: ~60% fewer allocations and syscalls in the per-second process collector
+- Performance: skip the WebSocket sample marshal when no clients are connected
+- Performance: stop parsing /proc/stat once past the CPU block
+
 ## [0.17.1] - 2026-05-29
 
 ### Added

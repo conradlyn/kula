@@ -71,7 +71,16 @@ func NewServer(cfg config.WebConfig, global config.GlobalConfig, c *collector.Co
 }
 
 // BroadcastSample sends a new sample to all WebSocket clients.
+//
+// When no clients are connected — the common case for a server whose
+// dashboard is closed — the per-tick JSON marshal is skipped entirely, so an
+// unwatched instance does zero serialization work each second. A client that
+// connects later receives the current sample from collector.Latest() during
+// the WebSocket upgrade, so nothing is lost.
 func (s *Server) BroadcastSample(sample *collector.Sample) {
+	if !s.hub.hasClients() {
+		return
+	}
 	data, err := json.Marshal(sample)
 	if err != nil {
 		return
@@ -923,6 +932,14 @@ func (h *wsHub) run() {
 			h.mu.Unlock()
 		}
 	}
+}
+
+// hasClients reports whether any WebSocket clients are currently connected.
+func (h *wsHub) hasClients() bool {
+	h.mu.RLock()
+	n := len(h.clients)
+	h.mu.RUnlock()
+	return n > 0
 }
 
 func (h *wsHub) broadcast(data []byte) {
