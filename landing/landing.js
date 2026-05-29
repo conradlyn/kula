@@ -174,15 +174,15 @@ document.addEventListener('DOMContentLoaded', () => {
 
         if (isVerified) {
             if (selectedTool === 'curl') {
-                command = `KULA_INSTALL=$(mktemp) ; curl -o \${KULA_INSTALL} -fsSL https://kula.ovh/install ; echo "f0c064b20d23c948a4569a35cfe65589a36a497aa0d9037413c6e452471355dd  \${KULA_INSTALL}" | sha256sum -c || rm -f \${KULA_INSTALL} ; bash \${KULA_INSTALL} ; rm -f \${KULA_INSTALL}`;
+                command = `KULA_INSTALL=$(mktemp) ; curl -o \${KULA_INSTALL} -fsSL https://raw.githubusercontent.com/c0m4r/kula/refs/heads/main/addons/install_v2.sh ; echo "bad61ee9eed4595d20fa7e613bd27c3b8700c67f8a5fcac756d282a811705398  \${KULA_INSTALL}" | sha256sum -c || rm -f \${KULA_INSTALL} ; bash \${KULA_INSTALL} ; rm -f \${KULA_INSTALL}`;
             } else {
-                command = `KULA_INSTALL=$(mktemp) ; wget -O \${KULA_INSTALL} -q https://kula.ovh/install ; echo "f0c064b20d23c948a4569a35cfe65589a36a497aa0d9037413c6e452471355dd  \${KULA_INSTALL}" | sha256sum -c || rm -f \${KULA_INSTALL} ; bash \${KULA_INSTALL} ; rm -f \${KULA_INSTALL}`;
+                command = `KULA_INSTALL=$(mktemp) ; wget -O \${KULA_INSTALL} -q https://raw.githubusercontent.com/c0m4r/kula/refs/heads/main/addons/install_v2.sh ; echo "bad61ee9eed4595d20fa7e613bd27c3b8700c67f8a5fcac756d282a811705398  \${KULA_INSTALL}" | sha256sum -c || rm -f \${KULA_INSTALL} ; bash \${KULA_INSTALL} ; rm -f \${KULA_INSTALL}`;
             }
         } else {
             if (selectedTool === 'curl') {
-                command = `bash -c "$(curl -fsSL https://raw.githubusercontent.com/c0m4r/kula/refs/heads/main/addons/install.sh)"`;
+                command = `bash -c "$(curl -fsSL https://raw.githubusercontent.com/c0m4r/kula/refs/heads/main/addons/install_v2.sh)"`;
             } else {
-                command = `bash -c "$(wget -qO- https://raw.githubusercontent.com/c0m4r/kula/refs/heads/main/addons/install.sh)"`;
+                command = `bash -c "$(wget -qO- https://raw.githubusercontent.com/c0m4r/kula/refs/heads/main/addons/install_v2.sh)"`;
             }
         }
 
