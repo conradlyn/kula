@@ -20,7 +20,6 @@ import select
 import socket
 import socketserver
 import sys
-import threading
 from http.server import BaseHTTPRequestHandler
 
 HOP_BY_HOP = {
