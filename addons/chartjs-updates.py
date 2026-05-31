@@ -41,7 +41,8 @@ def get_latest_version(npm_name: str) -> Optional[str]:
     """
     url = f"https://registry.npmjs.org/{npm_name}/latest"
     try:
-        with urllib.request.urlopen(url) as response:
+        # nosec B310: hardcoded https:// scheme, npm_name from LIBS constant (not user input)
+        with urllib.request.urlopen(url) as response:  # nosec B310
             data = json.loads(response.read().decode())
             version = data.get("version")
             return version if isinstance(version, str) else None
