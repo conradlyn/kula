@@ -140,7 +140,7 @@ func banner(color bool, msg string) string {
 }
 
 func printUsage(w interface{ Write([]byte) (int, error) }) {
-	fmt.Fprint(w, `kula-scan — active safeguard scanner for a running kula instance
+	_, _ = fmt.Fprint(w, `kula-scan — active safeguard scanner for a running kula instance
 
 Usage:
   kula-scan [flags] <target-url>

@@ -55,8 +55,8 @@ func runHeaderChecks(s *Scanner) []Finding {
 
 	// CSP: must constrain default-src to self, lock framing, and use a nonce.
 	csp := h.Get("Content-Security-Policy")
-	switch {
-	case csp == "":
+	switch csp {
+	case "":
 		out = append(out, finding("HDR-003", "headers", "Content-Security-Policy present", SevHigh, StatusFail,
 			"no Content-Security-Policy header; the dashboard has no script/XSS containment.").
 			withRemediation("Enable web.security.headers in config.yaml."))

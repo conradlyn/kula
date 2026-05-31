@@ -89,10 +89,10 @@ func (r *Report) writeText(w io.Writer, noColor bool) {
 		groups[f.Category] = append(groups[f.Category], f)
 	}
 
-	fmt.Fprintf(w, "\n%s %s\n", color(cBold, "kula-scan — target:"), r.Target)
+	_, _ = fmt.Fprintf(w, "\n%s %s\n", color(cBold, "kula-scan — target:"), r.Target)
 
 	for _, cat := range order {
-		fmt.Fprintf(w, "\n%s\n", color(cBold, strings.ToUpper(cat)))
+		_, _ = fmt.Fprintf(w, "\n%s\n", color(cBold, strings.ToUpper(cat)))
 		for _, f := range groups[cat] {
 			tag := fmt.Sprintf("%-5s", f.Status.String())
 			line := fmt.Sprintf("  %s %-10s %s", color(statusColor(f.Status), tag), f.ID, f.Title)
@@ -100,21 +100,21 @@ func (r *Report) writeText(w io.Writer, noColor bool) {
 			if f.Status == StatusFail || f.Status == StatusWarn {
 				line += " " + color(severityColor(f.Severity), "["+f.Severity.String()+"]")
 			}
-			fmt.Fprintln(w, line)
+			_, _ = fmt.Fprintln(w, line)
 			if f.Detail != "" {
-				fmt.Fprintf(w, "        %s\n", color(cGray, f.Detail))
+				_, _ = fmt.Fprintf(w, "        %s\n", color(cGray, f.Detail))
 			}
 			if f.Evidence != "" {
-				fmt.Fprintf(w, "        %s %s\n", color(cGray, "evidence:"), f.Evidence)
+				_, _ = fmt.Fprintf(w, "        %s %s\n", color(cGray, "evidence:"), f.Evidence)
 			}
 			if f.Remediation != "" && (f.Status == StatusFail || f.Status == StatusWarn) {
-				fmt.Fprintf(w, "        %s %s\n", color(cBlue, "fix:"), f.Remediation)
+				_, _ = fmt.Fprintf(w, "        %s %s\n", color(cBlue, "fix:"), f.Remediation)
 			}
 		}
 	}
 
 	s := r.Summary
-	fmt.Fprintf(w, "\n%s  %s  %s  %s  %s\n",
+	_, _ = fmt.Fprintf(w, "\n%s  %s  %s  %s  %s\n",
 		color(cBold, "Summary:"),
 		color(cGreen, fmt.Sprintf("%d pass", s.Pass)),
 		color(cRed, fmt.Sprintf("%d fail", s.Fail)),
