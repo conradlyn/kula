@@ -159,9 +159,9 @@ rm -f ${KULA_INSTALL}
 ### Standalone
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.17.2/kula-0.17.2-amd64.tar.gz
-echo "804b96337c4970f23f081620b804d0ff81a516c64f5b5c71e2fe2a68b2dab35a kula-0.17.2-amd64.tar.gz" | sha256sum -c || rm -f kula-0.17.2-amd64.tar.gz
-tar -xvf kula-0.17.2-amd64.tar.gz
+wget https://github.com/c0m4r/kula/releases/download/0.17.3/kula-0.17.3-amd64.tar.gz
+echo "464f5aa1c1b402cd167cf1695231d6cd4416b7593139f664c9a2112713976538 kula-0.17.3-amd64.tar.gz" | sha256sum -c || rm -f kula-0.17.3-amd64.tar.gz
+tar -xvf kula-0.17.3-amd64.tar.gz
 cd kula
 ./kula
 ```
@@ -184,18 +184,18 @@ docker logs -f kula
 ### Debian / Ubuntu (.deb)
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.17.2/kula-0.17.2-amd64.deb
-echo "72775325e178d85e2dd4ff967327559e3f7f8d0275f2db9c7c19f46c7410b175 kula-0.17.2-amd64.deb" | sha256sum -c || rm -f kula-0.17.2-amd64.deb
-sudo dpkg -i kula-0.17.2-amd64.deb
+wget https://github.com/c0m4r/kula/releases/download/0.17.3/kula-0.17.3-amd64.deb
+echo "49dd4355b1cca487aeb2a4ffdff3bcd8481264eeabfca2c704383c5ba067e240 kula-0.17.3-amd64.deb" | sha256sum -c || rm -f kula-0.17.3-amd64.deb
+sudo dpkg -i kula-0.17.3-amd64.deb
 journalctl -f -t kula
 ```
 
 ### RHEL / Fedora / CentOS / Rocky / Alma (.rpm)
 
 ```bash
-wget https://github.com/c0m4r/kula/releases/download/0.17.2/kula-0.17.2-x86_64.rpm
-echo "e311125504a77419f4832fa75e954dac6b8f7b1e932818f80d30bc3223b4a20f kula-0.17.2-x86_64.rpm" | sha256sum -c || rm -f kula-0.17.2-x86_64.rpm
-sudo rpm -i kula-0.17.2-x86_64.rpm
+wget https://github.com/c0m4r/kula/releases/download/0.17.3/kula-0.17.3-x86_64.rpm
+echo "f10283d48db223992f50582a3faa092639525d840b5373390c0182f411c77f54 kula-0.17.3-x86_64.rpm" | sha256sum -c || rm -f kula-0.17.3-x86_64.rpm
+sudo rpm -i kula-0.17.3-x86_64.rpm
 journalctl -f -t kula
 ```
 
