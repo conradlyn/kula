@@ -199,14 +199,92 @@ func TestWrapTailPersistsAcrossReopen(t *testing.T) {
 	}
 }
 
-// TestSelfHealPreFixWrappedFile simulates opening a file written by the OLD
-// code: full-size, no tail metadata, and a poisoned 1970-style oldest
-// timestamp. The fix must self-heal — drop the unrecoverable wrapped tail, keep
-// the contiguous [0, writeOff) records, and recompute a sane oldest timestamp.
-func TestSelfHealPreFixWrappedFile(t *testing.T) {
+// downgradeToPreFix rewrites a tier header to look like one written by the OLD
+// (pre-tail-tracking) binary: it clears the header-flags word and zeroes the
+// oldestOff field, leaving the data region and writeOff/count untouched. This
+// is exactly the on-disk shape a node carries when it upgrades from a release
+// before the tail-tracking change.
+func downgradeToPreFix(t *testing.T, path string) {
+	t.Helper()
+	f, err := os.OpenFile(path, os.O_RDWR, 0600)
+	if err != nil {
+		t.Fatalf("open for downgrade: %v", err)
+	}
+	defer func() { _ = f.Close() }()
+	hdr := make([]byte, headerSize)
+	if _, err := f.ReadAt(hdr, 0); err != nil {
+		t.Fatalf("read header: %v", err)
+	}
+	binary.LittleEndian.PutUint32(hdr[4:8], 0)   // clear hasTail/wrapped flags
+	binary.LittleEndian.PutUint64(hdr[56:64], 0) // clear oldestOff
+	if _, err := f.WriteAt(hdr, 0); err != nil {
+		t.Fatalf("write downgraded header: %v", err)
+	}
+}
+
+// TestUpgradePreFixUniformWrappedKeepsAllData is the regression test for the
+// "100% → 5%, data lost on upgrade" report. A stable node writes UNIFORM-size
+// records, fills and wraps the ring, then upgrades to the tail-tracking binary.
+// Opening that pre-fix file must keep it wrapped and return byte-for-byte the
+// same history — never silently abandon the [writeOff, maxData) segment.
+func TestUpgradePreFixUniformWrappedKeepsAllData(t *testing.T) {
 	dir := t.TempDir()
 	path := dir + "/tier_0.dat"
+	tier, err := OpenTier(path, 64*1024)
+	if err != nil {
+		t.Fatalf("OpenTier: %v", err)
+	}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const N = 4000
+	for i := 0; i < N; i++ {
+		// Constant interface count → uniform record size (a stable real node).
+		if err := tier.Write(varSample(base.Add(time.Duration(i)*time.Second), 2)); err != nil {
+			t.Fatalf("Write(%d): %v", i, err)
+		}
+	}
+	if !tier.wrapped {
+		t.Fatal("precondition: tier did not wrap")
+	}
+	newest := base.Add(time.Duration(N-1) * time.Second)
+	wantN := fullReadChecked(t, tier, base, newest)
+	wantOldest := tier.OldestTimestamp()
+	wantWriteOff := tier.writeOff
+	if err := tier.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+	t.Logf("baseline: %d records, oldest %s, writeOff %d (~%.0f%% of buffer)",
+		wantN, wantOldest.Format(time.RFC3339), wantWriteOff, float64(wantWriteOff)/float64(tier.maxData)*100)
 
+	downgradeToPreFix(t, path)
+
+	tier2, err := OpenTier(path, 64*1024)
+	if err != nil {
+		t.Fatalf("reopen pre-fix file: %v", err)
+	}
+	defer func() { _ = tier2.Close() }()
+
+	if !tier2.wrapped {
+		t.Fatalf("DATA LOSS: a full wrapped pre-fix tier opened as NOT wrapped "+
+			"(writeOff=%d) — the %d-record old segment was abandoned",
+			tier2.writeOff, wantN)
+	}
+	gotN := fullReadChecked(t, tier2, base, newest)
+	if gotN != wantN {
+		t.Errorf("DATA LOSS: full read returned %d records after upgrade, want %d", gotN, wantN)
+	}
+	if !tier2.OldestTimestamp().Equal(wantOldest) {
+		t.Errorf("oldest changed after upgrade: got %s want %s",
+			tier2.OldestTimestamp().Format(time.RFC3339), wantOldest.Format(time.RFC3339))
+	}
+}
+
+// TestUpgradePreFixWrappedNeverWipes covers the harder variable-size case: even
+// when the old "oldest == writeOff" assumption is imperfect, the upgrade must
+// not throw the ring away. It must stay wrapped (preserving the on-disk old
+// segment) and must keep collecting correctly afterwards.
+func TestUpgradePreFixWrappedNeverWipes(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/tier_0.dat"
 	tier, err := OpenTier(path, 64*1024)
 	if err != nil {
 		t.Fatalf("OpenTier: %v", err)
@@ -221,13 +299,66 @@ func TestSelfHealPreFixWrappedFile(t *testing.T) {
 	if !tier.wrapped {
 		t.Fatal("precondition: tier did not wrap")
 	}
-	newest := base.Add(time.Duration(N-1) * time.Second)
+	wantWriteOff, wantCount := tier.writeOff, tier.count
 	if err := tier.Close(); err != nil {
 		t.Fatalf("Close: %v", err)
 	}
 
-	// Rewrite the header to look pre-fix: clear header flags, zero oldestOff,
-	// and poison oldestTS with the classic garbage (1970-01-01T...).
+	downgradeToPreFix(t, path)
+
+	tier2, err := OpenTier(path, 64*1024)
+	if err != nil {
+		t.Fatalf("reopen: %v", err)
+	}
+	defer func() { _ = tier2.Close() }()
+
+	if !tier2.wrapped {
+		t.Errorf("variable-size pre-fix wrapped tier was wiped to non-wrapped on upgrade")
+	}
+	if tier2.writeOff != wantWriteOff || tier2.count != wantCount {
+		t.Errorf("writeOff/count changed on upgrade: got (%d,%d) want (%d,%d)",
+			tier2.writeOff, tier2.count, wantWriteOff, wantCount)
+	}
+	// The head segment is always cleanly readable, and reads must keep working.
+	now := base.Add(time.Duration(N) * time.Second)
+	if err := tier2.Write(varSample(now, 4)); err != nil {
+		t.Fatalf("post-upgrade write: %v", err)
+	}
+	if _, err := tier2.ReadRange(base, now.Add(time.Second)); err != nil {
+		t.Fatalf("post-upgrade ReadRange: %v", err)
+	}
+}
+
+// TestUpgradeCorruptNewFormatTailNeverWipes covers a new-format file whose
+// persisted tail offset is corrupt (the symptom of the earlier runaway-tail
+// bug). Validation must reject the bad offset, but the ring must still be kept
+// by falling back to the old writeOff-based layout — never wiped.
+func TestUpgradeCorruptNewFormatTailNeverWipes(t *testing.T) {
+	dir := t.TempDir()
+	path := dir + "/tier_0.dat"
+	tier, err := OpenTier(path, 64*1024)
+	if err != nil {
+		t.Fatalf("OpenTier: %v", err)
+	}
+	base := time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC)
+	const N = 4000
+	for i := 0; i < N; i++ {
+		if err := tier.Write(varSample(base.Add(time.Duration(i)*time.Second), 2)); err != nil {
+			t.Fatalf("Write(%d): %v", i, err)
+		}
+	}
+	if !tier.wrapped {
+		t.Fatal("precondition: tier did not wrap")
+	}
+	newest := base.Add(time.Duration(N-1) * time.Second)
+	wantN := fullReadChecked(t, tier, base, newest)
+	maxData := tier.maxData
+	if err := tier.Close(); err != nil {
+		t.Fatalf("Close: %v", err)
+	}
+
+	// Keep the hasTail+wrapped flags but poison the tail offset out of range,
+	// mimicking the runaway-tail corruption an earlier build could persist.
 	f, err := os.OpenFile(path, os.O_RDWR, 0600)
 	if err != nil {
 		t.Fatalf("open for poisoning: %v", err)
@@ -236,9 +367,7 @@ func TestSelfHealPreFixWrappedFile(t *testing.T) {
 	if _, err := f.ReadAt(hdr, 0); err != nil {
 		t.Fatalf("read header: %v", err)
 	}
-	binary.LittleEndian.PutUint32(hdr[4:8], 0)               // clear hasTail/wrapped flags
-	binary.LittleEndian.PutUint64(hdr[56:64], 0)             // clear oldestOff
-	binary.LittleEndian.PutUint64(hdr[40:48], 5497558139648) // 1970-01-01T... garbage
+	binary.LittleEndian.PutUint64(hdr[56:64], uint64(maxData)) // out-of-range oldestOff
 	if _, err := f.WriteAt(hdr, 0); err != nil {
 		t.Fatalf("write poisoned header: %v", err)
 	}
@@ -246,34 +375,14 @@ func TestSelfHealPreFixWrappedFile(t *testing.T) {
 
 	tier2, err := OpenTier(path, 64*1024)
 	if err != nil {
-		t.Fatalf("reopen pre-fix file: %v", err)
+		t.Fatalf("reopen: %v", err)
 	}
 	defer func() { _ = tier2.Close() }()
 
-	if tier2.wrapped {
-		t.Error("self-heal should clear the unverifiable wrapped state")
+	if !tier2.wrapped {
+		t.Fatalf("DATA LOSS: corrupt-tail file opened as NOT wrapped — old segment abandoned")
 	}
-	if got := tier2.OldestTimestamp(); got.Year() < 2020 {
-		t.Errorf("oldest timestamp still garbage after self-heal: %s", got.Format(time.RFC3339))
-	}
-	// The surviving contiguous block [0, writeOff) must still read back cleanly
-	// and still reach the true newest record.
-	n := fullReadChecked(t, tier2, base, newest)
-	if n == 0 {
-		t.Fatal("no records survived self-heal")
-	}
-	t.Logf("self-heal kept %d contiguous records, oldest now %s",
-		n, tier2.OldestTimestamp().Format(time.RFC3339))
-
-	// A subsequent write must persist proper tail metadata again.
-	if err := tier2.Write(varSample(newest.Add(time.Second), 3)); err != nil {
-		t.Fatalf("post-heal write: %v", err)
-	}
-	info, err := InspectTierFile(path)
-	if err != nil {
-		t.Fatalf("InspectTierFile: %v", err)
-	}
-	if info.OldestTS.Year() < 2020 {
-		t.Errorf("inspect still shows garbage oldest: %s", info.OldestTS.Format(time.RFC3339))
+	if gotN := fullReadChecked(t, tier2, base, newest); gotN != wantN {
+		t.Errorf("corrupt-tail recovery changed record count: got %d want %d", gotN, wantN)
 	}
 }

@@ -148,40 +148,60 @@ func (t *Tier) readHeader() error {
 	}
 
 	headerFlags := binary.LittleEndian.Uint32(buf[4:8])
+	tailTrusted := false
 	if headerFlags&flagHeaderHasTail != 0 {
-		// Written by tail-tracking code. Trust the persisted state, but
-		// validate the wrapped tail: an offset left behind by an earlier buggy
-		// build can point at garbage (e.g. a far-future "2119" timestamp), and
-		// blindly trusting it would perpetuate the very bug we are fixing.
+		// Written by tail-tracking code.
 		t.wrapped = headerFlags&flagHeaderWrapped != 0
 		t.oldestOff = int64(binary.LittleEndian.Uint64(buf[56:64]))
-		if t.wrapped {
-			ok := t.oldestOff >= t.writeOff && t.oldestOff < t.maxData
-			if ok {
-				ts, err := t.readTimestampAt(t.oldestOff)
-				if err == nil && !ts.IsZero() && (t.newestTS.IsZero() || !ts.After(t.newestTS)) {
-					t.oldestTS = ts
-				} else {
-					ok = false // tail doesn't decode, or is newer than newest
-				}
-			}
-			if !ok {
-				t.wrapped = false // corrupt tail → self-heal below
+		switch {
+		case !t.wrapped:
+			tailTrusted = true // legitimate non-wrapped state; nothing to validate
+		case t.oldestOff >= t.writeOff && t.oldestOff < t.maxData:
+			// Validate the persisted tail: an offset left behind by an earlier
+			// buggy build can point at garbage (e.g. a far-future "2119"
+			// timestamp). Only trust a tail that decodes to a sane oldest.
+			if ts, err := t.readTimestampAt(t.oldestOff); err == nil &&
+				!ts.IsZero() && (t.newestTS.IsZero() || !ts.After(t.newestTS)) {
+				t.oldestTS = ts
+				tailTrusted = true
 			}
 		}
-	} else if t.count > 0 {
-		// Pre-fix file (no tail metadata). Self-heal: the byte offset of the
-		// oldest surviving record was never recorded and cannot be recovered
-		// (old record boundaries are destroyed once newer records overwrite
-		// them, and a full-size file makes the old size-based heuristic
-		// misfire). Drop any stale wrapped tail and keep the contiguous records
-		// in [0, writeOff); new writes refill the rest.
-		t.wrapped = false
 	}
 
-	// Whenever we are (or fell back to) the non-wrapped state, the oldest record
-	// sits at offset 0. Re-derive oldestTS from there so it can never be the
-	// classic 1970/2119 garbage a buggy header may carry.
+	if !tailTrusted {
+		// Reached for (a) pre-fix files with no tail metadata and (b)
+		// new-format files whose persisted wrapped tail failed validation
+		// (corrupt offset from an earlier buggy build). In BOTH cases reproduce
+		// the PREVIOUS binary's layout instead of dropping data: if the file is
+		// physically larger than [0, writeOff) it had wrapped, so keep the whole
+		// ring by assuming the oldest record begins at writeOff — exactly what
+		// the old code read (ReadRange becomes byte-for-byte identical). Tail
+		// tracking then refines oldestOff on the next writes.
+		//
+		// Dropping the [writeOff, maxData) segment here would wipe up to a whole
+		// buffer of history on upgrade — a stable node has uniform records and a
+		// perfectly valid old segment. Self-heal must never self-annihilate.
+		t.wrapped = false
+		t.oldestOff = 0
+		if t.count > 0 {
+			fileInfo, _ := t.file.Stat()
+			if fileInfo != nil && fileInfo.Size() > headerSize+t.writeOff {
+				t.wrapped = true
+				t.oldestOff = t.writeOff
+				// Refresh oldestTS from the assumed tail when it decodes sanely;
+				// otherwise keep the header value (display-only; it self-corrects
+				// as the ring cycles). This never affects what data is kept.
+				if ts, err := t.readTimestampAt(t.writeOff); err == nil &&
+					!ts.IsZero() && (t.newestTS.IsZero() || !ts.After(t.newestTS)) {
+					t.oldestTS = ts
+				}
+			}
+		}
+	}
+
+	// Non-wrapped: the oldest record sits at offset 0. Re-derive oldestTS from
+	// there so it can never be the classic 1970/2119 garbage a buggy header may
+	// carry.
 	if !t.wrapped {
 		t.oldestOff = 0
 		if t.count > 0 && t.writeOff > 0 {
